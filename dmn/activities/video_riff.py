@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dmn import generators as gens
 from dmn.activities import ActivityContext, ActivityResult, register
+from dmn.journal import JOURNAL_DIR
+from dmn.paths import artifact_href_for_journal
 from dmn.seeds import Seed
 
 VIDEO_SYSTEM = (
@@ -55,7 +57,10 @@ class VideoRiffActivity:
                 embedding_text=seed.text,
                 metadata={"error": str(e)},
             )
-        target = artifact.bytes_path or artifact.url or ""
+        raw = artifact.bytes_path or artifact.url or ""
+        target = (
+            artifact_href_for_journal(JOURNAL_DIR, raw) if raw else ""
+        )
         body = "\n".join(
             [
                 f"## Video riff: {seed.text}",

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dmn import generators as gens
 from dmn.activities import ActivityContext, ActivityResult, register
+from dmn.journal import JOURNAL_DIR
+from dmn.paths import artifact_href_for_journal
 from dmn.seeds import Seed
 
 MUSIC_SYSTEM = (
@@ -97,7 +99,7 @@ class MusicRiffActivity:
     def _render_body(
         self, seed: Seed, music_prompt: str, artifact, generator: str
     ) -> str:
-        target = artifact.bytes_path or artifact.url or ""
+        raw = artifact.bytes_path or artifact.url or ""
         seconds = artifact.seconds or "?"
         lines = [
             f"## Music riff: {seed.text}",
@@ -109,7 +111,8 @@ class MusicRiffActivity:
             f"> {music_prompt}",
             "",
         ]
-        if target:
+        if raw:
+            target = artifact_href_for_journal(JOURNAL_DIR, raw)
             lines.extend(
                 [
                     f'<audio controls src="{target}"></audio>',

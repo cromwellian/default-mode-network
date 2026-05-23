@@ -9,6 +9,8 @@ from __future__ import annotations
 from dmn import generators as gens
 from dmn.activities import ActivityContext, ActivityResult, register
 from dmn.activities._helpers import slugify
+from dmn.journal import JOURNAL_DIR
+from dmn.paths import artifact_href_for_journal
 from dmn.seeds import Seed
 
 VISUAL_SYSTEM = (
@@ -143,8 +145,9 @@ class ImageRiffActivity:
             f"> {visual_prompt}",
             "",
         ]
-        target = artifact.bytes_path or artifact.url or ""
-        if target:
+        raw = artifact.bytes_path or artifact.url or ""
+        if raw:
+            target = artifact_href_for_journal(JOURNAL_DIR, raw)
             lines.append(f"![generated]({target})")
         if commentary:
             lines.extend(["", "### Curator's note", "", commentary])

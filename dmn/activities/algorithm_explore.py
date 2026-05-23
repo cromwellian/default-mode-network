@@ -18,6 +18,8 @@ from dmn.activities._helpers import (
     write_artifact_dir,
 )
 from dmn.generators import Artifact
+from dmn.journal import JOURNAL_DIR
+from dmn.paths import artifact_href_for_journal
 from dmn.sandbox import run_python
 from dmn.seeds import Seed
 
@@ -204,7 +206,8 @@ class AlgorithmExploreActivity:
         if execution is not None:
             lines.extend(self._render_execution(execution))
             if plot.exists():
-                lines.extend(["", f"![plot]({plot})"])
+                plot_href = artifact_href_for_journal(JOURNAL_DIR, plot)
+                lines.extend(["", f"![plot]({plot_href})"])
         if commentary:
             lines.extend(["", "### Commentary", "", commentary])
         return "\n".join(lines)

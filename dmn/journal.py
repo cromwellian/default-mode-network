@@ -7,6 +7,8 @@ import re
 from pathlib import Path
 from typing import Iterable
 
+from dmn.paths import artifact_href
+
 JOURNAL_DIR = Path("journal")
 
 
@@ -87,12 +89,12 @@ def write_brief(
     fm = "\n".join(fm_parts)
     body_text = (body or "").rstrip()
     if artifact:
-        body_text = body_text + "\n\n" + _render_artifact_md(artifact)
+        body_text = body_text + "\n\n" + _render_artifact_md(artifact, path)
     if artifacts:
         # Activities pass dicts; embed each at the foot of the body.
         embed_lines: list[str] = []
         for a in artifacts:
-            md = _render_artifact_md(a)
+            md = _render_artifact_md(a, path)
             if md:
                 embed_lines.append(md)
         if embed_lines:
@@ -101,18 +103,23 @@ def write_brief(
     return path
 
 
-def _render_artifact_md(artifact: dict) -> str:
+def _render_artifact_md(artifact: dict, brief_path: Path) -> str:
     """Return the markdown snippet to embed an artifact at the bottom of a brief."""
     modality = artifact.get("modality", "")
     bp = artifact.get("bytes_path") or ""
     url = artifact.get("url") or ""
-    target = bp or url
-    if not target:
+    raw = bp or url
+    if not raw:
         return ""
+    target = artifact_href(brief_path, raw)
     if modality == "image":
         return f"![generated]({target})"
     if modality == "music":
-        return f"[Listen]({target}) — {artifact.get('seconds', '?')}s"
+        seconds = artifact.get("seconds", "?")
+        return (
+            f'<audio controls src="{target}"></audio>\n\n'
+            f"[Listen]({target}) — {seconds}s"
+        )
     if modality == "video":
         return f"[Watch]({target})"
     return f"[Artifact]({target})"
