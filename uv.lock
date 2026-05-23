@@ -620,6 +620,7 @@ generators = [
 ]
 image = [
     { name = "google-genai" },
+    { name = "huggingface-hub" },
     { name = "pillow" },
     { name = "replicate" },
 ]
@@ -647,6 +648,7 @@ requires-dist = [
     { name = "google-genai", marker = "extra == 'generators'", specifier = ">=0.3.0" },
     { name = "google-genai", marker = "extra == 'image'", specifier = ">=0.3.0" },
     { name = "google-genai", marker = "extra == 'music'", specifier = ">=0.3.0" },
+    { name = "huggingface-hub", marker = "extra == 'image'", specifier = ">=0.26.0" },
     { name = "matplotlib", marker = "extra == 'activities'", specifier = ">=3.8.0" },
     { name = "matplotlib", marker = "extra == 'code'", specifier = ">=3.8.0" },
     { name = "musicbrainzngs", marker = "extra == 'musicbrainz'", specifier = ">=0.7.1" },

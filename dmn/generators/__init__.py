@@ -114,6 +114,7 @@ def _register_all() -> None:
     for mod in [
         "_dry_run",
         "image_nano_banana",
+        "image_hf",
         "image_replicate",
         "music_lyria",
         "music_stable_audio",

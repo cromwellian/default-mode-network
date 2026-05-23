@@ -51,27 +51,34 @@ class ImageRiffActivity:
                 embedding_text=seed.text,
                 metadata={"skipped": True},
             )
-        try:
-            artifact = backend.generate(visual_prompt)
-        except Exception as e:
+        artifact = None
+        errors: list[str] = []
+        for backend in self._backends(ctx):
+            try:
+                artifact = backend.generate(visual_prompt)
+                break
+            except Exception as e:
+                errors.append(f"{backend.name}: {e}")
+        if artifact is None:
+            err = "; ".join(errors) if errors else "no image backend available"
             return ActivityResult(
                 title=f"Image (failed): {seed.text[:60]}",
                 body_md=(
                     f"## Image riff\n\n**Seed:** {seed.text}\n\n"
-                    f"_(generator `{backend.name}` failed: {e})_"
+                    f"_(all generators failed: {err})_"
                 ),
                 embedding_text=seed.text,
-                metadata={"error": str(e), "generator": backend.name},
+                metadata={"error": err, "generator": backend.name if backend else None},
             )
         commentary = self._curator_blurb(seed, visual_prompt, ctx)
-        body = self._render_body(seed, visual_prompt, artifact, commentary, backend.name)
+        body = self._render_body(seed, visual_prompt, artifact, commentary, artifact.generator)
         return ActivityResult(
             title=f"Image: {seed.text[:60]}",
             body_md=body,
             artifacts=[artifact],
             embedding_text=seed.text + " :: " + visual_prompt[:300],
             metadata={
-                "generator": backend.name,
+                "generator": artifact.generator,
                 "visual_prompt": visual_prompt,
             },
         )
@@ -106,13 +113,16 @@ class ImageRiffActivity:
         except Exception:
             return ""
 
+    def _backends(self, ctx: ActivityContext):
+        """Available image backends in priority order; dry-run uses the stub only."""
+        if ctx.dry_run:
+            return [g for g in gens.available_for("image") if g.name.startswith("dryrun_")]
+        return [g for g in gens.available_for("image") if not g.name.startswith("dryrun_")]
+
     def _pick_backend(self, ctx: ActivityContext):
         """First available image backend; in dry-run, restrict to the stub."""
-        if ctx.dry_run:
-            stubs = [g for g in gens.available_for("image") if g.name.startswith("dryrun_")]
-            return stubs[0] if stubs else None
-        real = [g for g in gens.available_for("image") if not g.name.startswith("dryrun_")]
-        return real[0] if real else None
+        backends = self._backends(ctx)
+        return backends[0] if backends else None
 
     def _render_body(
         self,
