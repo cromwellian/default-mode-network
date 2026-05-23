@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+.env.local
+
+# Caches
+.uv/
+.cache/
+.mypy_cache/
+.ruff_cache/
+
+# DMN local-only data + briefs (track only the .gitkeep)
+data/*
+!data/.gitkeep
+journal/*
+!journal/.gitkeep
