@@ -2,10 +2,17 @@
 
 Factored out in v0.2 so wander mode reuses the same tool-planning + tool-execution +
 synthesis-prompt as flat mode. Behavior is byte-identical to v0.1.x for flat callers.
+
+v0.2.1: the synthesis prompt now asks the LLM to append a fenced ```json block with
+`entities` and `rabbit_holes`. `parse_synthesis` extracts that block (regex + json.loads,
+robust to absence) and returns (clean_body, entities, rabbit_holes). Stub-LLM dry-runs
+won't produce the JSON block; the parser yields empty lists in that case.
 """
 from __future__ import annotations
 
+import json
 import random
+import re
 from typing import Callable, Optional
 
 from dmn.tools import ResearchItem
@@ -22,8 +29,78 @@ SYNTHESIS_SYSTEM = (
     "1) **What surprised me**, "
     "2) **One thing you'll find delightful**, "
     "3) **A rabbit hole for tomorrow**. "
-    "Cite sources inline as [title](url) when relevant."
+    "Cite sources inline as [title](url) when relevant.\n\n"
+    "AFTER the markdown brief, append a single fenced ```json block (and nothing after it) "
+    "containing two keys:\n"
+    "- `entities`: list of objects with `name` (str), `type` (one of: person | org | paper "
+    "| concept | topic | place | tool), and `salience` (float 0..1). Pick 3-7 of the most "
+    "concrete, specific entities the brief actually leans on.\n"
+    "- `rabbit_holes`: list of 2-4 short strings naming side-threads worth pursuing.\n"
+    "Example tail (one example only — do not include this verbatim):\n"
+    "```json\n"
+    '{"entities": [{"name": "Constitutional AI", "type": "concept", "salience": 0.9}], '
+    '"rabbit_holes": ["annotator disagreement modeling"]}\n'
+    "```"
 )
+
+
+# Capture any fenced ```json ... ``` block (greedy across newlines). Used to extract
+# the structured tail that the v0.2.1 synthesis prompt asks for. We deliberately match
+# only `json`-typed fences so plain code samples in the brief body are left intact.
+_JSON_FENCE_RE = re.compile(
+    r"```\s*json\s*\n(.*?)\n\s*```", re.DOTALL | re.IGNORECASE
+)
+
+
+def parse_synthesis(raw_text: str) -> tuple[str, list[dict], list[str]]:
+    """Split a raw synthesis response into (clean_markdown, entities, rabbit_holes).
+
+    Strategy:
+      1. Find the LAST ```json fenced block (the prompt asks for it at the tail; a real
+         LLM occasionally hallucinates an example earlier, so we take the last one).
+      2. Try `json.loads` on its body. On any failure, return empty lists and leave the
+         body untouched.
+      3. On success, strip the fenced block from the body so the markdown stays clean.
+
+    Stub-LLM dry-runs don't produce the JSON block and just round-trip ([], []).
+    """
+    raw_text = raw_text or ""
+    matches = list(_JSON_FENCE_RE.finditer(raw_text))
+    if not matches:
+        return raw_text.strip(), [], []
+    last = matches[-1]
+    payload = last.group(1).strip()
+    try:
+        data = json.loads(payload)
+    except Exception:
+        return raw_text.strip(), [], []
+    if not isinstance(data, dict):
+        return raw_text.strip(), [], []
+    raw_entities = data.get("entities") or []
+    raw_rabbits = data.get("rabbit_holes") or []
+    entities: list[dict] = []
+    for e in raw_entities:
+        if not isinstance(e, dict):
+            continue
+        name = (e.get("name") or "").strip()
+        if not name:
+            continue
+        ent_type = (e.get("type") or "concept").strip().lower()
+        try:
+            salience = float(e.get("salience", 0.5))
+        except (TypeError, ValueError):
+            salience = 0.5
+        salience = max(0.0, min(1.0, salience))
+        entities.append({"name": name, "type": ent_type, "salience": salience})
+    rabbit_holes: list[str] = []
+    for rh in raw_rabbits:
+        if isinstance(rh, str):
+            rh = rh.strip()
+            if rh:
+                rabbit_holes.append(rh)
+    # Strip the trailing fenced block from the markdown body.
+    clean_body = (raw_text[: last.start()] + raw_text[last.end():]).strip()
+    return clean_body, entities, rabbit_holes
 
 
 def plan_tools(

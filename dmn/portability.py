@@ -22,8 +22,8 @@ import numpy as np
 
 from dmn import __version__, store
 
-SCHEMA_VERSION = 3
-_SUPPORTED_SCHEMAS = {1, 2, 3}
+SCHEMA_VERSION = 4
+_SUPPORTED_SCHEMAS = {1, 2, 3, 4}
 
 
 def _embedding_model_name() -> str:

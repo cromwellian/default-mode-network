@@ -35,6 +35,7 @@ from dmn.loop import (
     SYNTHESIS_SYSTEM,
     available_tools_for,
     execute_tools,
+    parse_synthesis,
     plan_tools,
 )
 from dmn.tools import ResearchItem
@@ -436,12 +437,13 @@ def _expand_brief(
         "Write the brief now."
     )
     try:
-        resp = llm.complete(system=SYNTHESIS_SYSTEM, user=prompt, max_tokens=600)
-        body = (resp.text or "").strip()
+        resp = llm.complete(system=SYNTHESIS_SYSTEM, user=prompt, max_tokens=800)
+        raw_body = (resp.text or "").strip()
     except Exception as e:
         if verbose:
             console.print(f"[yellow]  LLM error: {e}[/]")
-        body = f"_(synthesis failed; raw findings)_\n\n{gathered}"
+        raw_body = f"_(synthesis failed; raw findings)_\n\n{gathered}"
+    body, entities, rabbit_holes = parse_synthesis(raw_body)
 
     brief_emb = emb.embed([chosen_seed.text + " :: " + body[:1000]])[0]
     d_brief = taste.dopamine(brief_emb, centroids, recent_embs, rng)
@@ -478,6 +480,8 @@ def _expand_brief(
         mutation=mutation,
         depth=depth,
         status="open",
+        entities=entities,
+        rabbit_holes=rabbit_holes,
     )
     store.add_finding(
         conn, chosen_seed.text + " :: " + body[:200], brief_emb

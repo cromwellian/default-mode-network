@@ -342,3 +342,71 @@ def _node_class(status: str, score: float) -> str:
     if score >= 0.3:
         return "mid"
     return "low"
+
+
+def render_entity_cooccurrence_mermaid(nodes: list[dict], top_n: int = 30) -> str:
+    """v0.2.1: Mermaid entity co-occurrence graph across a wander session.
+
+    Aggregates `entities` lists from `nodes`, picks the top-N by total salience-weight,
+    and emits a `graph LR` where edges connect entities co-occurring in the same brief.
+    Returns the empty string if no node carries entity data.
+    """
+    # 1. aggregate per-node entity sets + global salience-weight totals
+    node_entity_sets: list[set[str]] = []
+    salience_totals: dict[str, float] = {}
+    entity_types: dict[str, str] = {}
+    for n in nodes:
+        ents = n.get("entities") or []
+        names: set[str] = set()
+        for e in ents:
+            if not isinstance(e, dict):
+                continue
+            name = (e.get("name") or "").strip()
+            if not name:
+                continue
+            try:
+                salience = float(e.get("salience", 0.5))
+            except (TypeError, ValueError):
+                salience = 0.5
+            salience_totals[name] = salience_totals.get(name, 0.0) + salience
+            entity_types.setdefault(name, e.get("type") or "concept")
+            names.add(name)
+        node_entity_sets.append(names)
+
+    if not salience_totals:
+        return ""
+
+    # 2. pick top-N entities by total salience
+    top = sorted(salience_totals.items(), key=lambda kv: -kv[1])[:top_n]
+    keep = {name for name, _ in top}
+    if not keep:
+        return ""
+
+    # 3. compute pairwise co-occurrence (count of briefs both entities appear in)
+    cooc: dict[tuple[str, str], int] = {}
+    for names in node_entity_sets:
+        kept = sorted(n for n in names if n in keep)
+        for i in range(len(kept)):
+            for j in range(i + 1, len(kept)):
+                key = (kept[i], kept[j])
+                cooc[key] = cooc.get(key, 0) + 1
+
+    # 4. emit Mermaid (graph LR for entity nets — denser, less tree-like than TD)
+    lines = ["```mermaid", "graph LR"]
+    name_to_id: dict[str, str] = {}
+    for idx, (name, _) in enumerate(top):
+        nid = f"e{idx}"
+        name_to_id[name] = nid
+        safe = name.replace('"', "'").replace("\n", " ")[:40]
+        kind = entity_types.get(name, "concept")
+        lines.append(f'  {nid}["{safe}<br/><i>{kind}</i>"]')
+    for (a, b), count in sorted(cooc.items(), key=lambda kv: -kv[1]):
+        if a in name_to_id and b in name_to_id and count >= 1:
+            if count > 1:
+                lines.append(
+                    f'  {name_to_id[a]} ---|"x{count}"| {name_to_id[b]}'
+                )
+            else:
+                lines.append(f"  {name_to_id[a]} --- {name_to_id[b]}")
+    lines.append("```")
+    return "\n".join(lines) + "\n"

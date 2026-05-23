@@ -31,7 +31,13 @@ from dmn import embeddings as emb
 from dmn import generators as gens
 from dmn import journal, seeds, store, taste
 from dmn.llm import get_llm
-from dmn.loop import SAFE_TOOLS, SYNTHESIS_SYSTEM, execute_tools, plan_tools
+from dmn.loop import (
+    SAFE_TOOLS,
+    SYNTHESIS_SYSTEM,
+    execute_tools,
+    parse_synthesis,
+    plan_tools,
+)
 from dmn.tools import ResearchItem
 
 console = Console()
@@ -177,13 +183,14 @@ def main(
         )
         try:
             resp = llm.complete(
-                system=SYNTHESIS_SYSTEM, user=prompt, max_tokens=600
+                system=SYNTHESIS_SYSTEM, user=prompt, max_tokens=800
             )
-            body = (resp.text or "").strip()
+            raw_body = (resp.text or "").strip()
         except Exception as e:
             if verbose:
                 console.print(f"[yellow]  LLM error: {e}[/]")
-            body = f"_(synthesis failed; raw findings)_\n\n{gathered}"
+            raw_body = f"_(synthesis failed; raw findings)_\n\n{gathered}"
+        body, entities, rabbit_holes = parse_synthesis(raw_body)
 
         brief_emb = emb.embed([chosen_seed.text + " :: " + body[:1000]])[0]
         d_brief = taste.dopamine(brief_emb, centroids, recent_embs, rng)
@@ -212,6 +219,8 @@ def main(
             d_brief,
             str(path),
             brief_emb,
+            entities=entities,
+            rabbit_holes=rabbit_holes,
         )
         store.add_finding(
             conn, chosen_seed.text + " :: " + body[:200], brief_emb

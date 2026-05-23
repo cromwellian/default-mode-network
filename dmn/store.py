@@ -64,7 +64,7 @@ def _vec_from_json(s: Optional[str]) -> Optional[np.ndarray]:
     return np.asarray(json.loads(s), dtype=np.float32)
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -72,6 +72,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
     v2: clusters.meta + interests.tags
     v3: journal tree-search columns (parent_id, mutation, depth, status, subtree_score)
+    v4: journal entity-tagging columns (entities, rabbit_holes — both JSON TEXT)
     """
     for sql in [
         # v2
@@ -83,6 +84,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "ALTER TABLE journal ADD COLUMN depth INTEGER DEFAULT 0",
         "ALTER TABLE journal ADD COLUMN status TEXT DEFAULT 'open'",
         "ALTER TABLE journal ADD COLUMN subtree_score REAL",
+        # v4 — entity tagging on brief synthesis (powers mutate_deepen)
+        "ALTER TABLE journal ADD COLUMN entities TEXT",
+        "ALTER TABLE journal ADD COLUMN rabbit_holes TEXT",
     ]:
         try:
             conn.execute(sql)
@@ -232,7 +236,8 @@ def update_cluster_label(
 
 _JOURNAL_COLUMNS = (
     "id, seed, seed_source, tools, dopamine_total, dopamine_breakdown, "
-    "path, embedding, created_at, parent_id, mutation, depth, status, subtree_score"
+    "path, embedding, created_at, parent_id, mutation, depth, status, "
+    "subtree_score, entities, rabbit_holes"
 )
 
 
@@ -253,6 +258,8 @@ def _row_to_journal(row: tuple) -> dict:
         "depth": int(row[11] or 0),
         "status": row[12] or "open",
         "subtree_score": row[13],
+        "entities": json.loads(row[14]) if row[14] else [],
+        "rabbit_holes": json.loads(row[15]) if row[15] else [],
     }
 
 
@@ -268,18 +275,25 @@ def add_journal(
     mutation: Optional[str] = None,
     depth: int = 0,
     status: str = "open",
+    entities: Optional[list] = None,
+    rabbit_holes: Optional[list] = None,
 ) -> int:
     """Record a brief in the journal index; returns its row id.
 
     v0.2 adds tree-search fields (`parent_id`, `mutation`, `depth`, `status`); flat-mode
     callers who don't pass them get sensible defaults (`mutation=None`, `depth=0`,
     `status='open'`) — fully back-compat with v0.1.x callers.
+
+    v0.2.1 adds `entities` and `rabbit_holes` (lists, default empty); these power
+    `mutate_deepen` / `mutate_branch` on subsequent expansions.
     """
+    entities_json = json.dumps(entities) if entities else None
+    rabbit_holes_json = json.dumps(rabbit_holes) if rabbit_holes else None
     cur = conn.execute(
         "INSERT INTO journal(seed, seed_source, tools, dopamine_total, "
         "dopamine_breakdown, path, embedding, created_at, "
-        "parent_id, mutation, depth, status, subtree_score) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "parent_id, mutation, depth, status, subtree_score, entities, rabbit_holes) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             seed,
             seed_source,
@@ -294,10 +308,26 @@ def add_journal(
             int(depth),
             status,
             float(dopamine.get("total", 0.0)),
+            entities_json,
+            rabbit_holes_json,
         ),
     )
     conn.commit()
     return cur.lastrowid
+
+
+def get_entities(conn: sqlite3.Connection, journal_id: int) -> list[dict]:
+    """Return the structured entities recorded for a journal row, or [] if none."""
+    row = conn.execute(
+        "SELECT entities FROM journal WHERE id = ?", (journal_id,)
+    ).fetchone()
+    if not row or not row[0]:
+        return []
+    try:
+        data = json.loads(row[0])
+    except Exception:
+        return []
+    return data if isinstance(data, list) else []
 
 
 def list_journal(conn: sqlite3.Connection, limit: int = 50) -> list[dict]:
