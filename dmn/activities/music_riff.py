@@ -44,25 +44,32 @@ class MusicRiffActivity:
                 embedding_text=seed.text,
                 metadata={"skipped": True},
             )
-        try:
-            artifact = backend.generate(music_prompt)
-        except Exception as e:
+        artifact = None
+        errors: list[str] = []
+        for backend in self._backends(ctx):
+            try:
+                artifact = backend.generate(music_prompt)
+                break
+            except Exception as e:
+                errors.append(f"{backend.name}: {e}")
+        if artifact is None:
+            err = "; ".join(errors) if errors else "no music backend available"
             return ActivityResult(
                 title=f"Music (failed): {seed.text[:60]}",
                 body_md=(
                     f"## Music riff\n\n**Seed:** {seed.text}\n\n"
-                    f"_(generator `{backend.name}` failed: {e})_"
+                    f"_(all generators failed: {err})_"
                 ),
                 embedding_text=seed.text,
-                metadata={"error": str(e), "generator": backend.name},
+                metadata={"error": err, "generator": backend.name if backend else None},
             )
-        body = self._render_body(seed, music_prompt, artifact, backend.name)
+        body = self._render_body(seed, music_prompt, artifact, artifact.generator)
         return ActivityResult(
             title=f"Music: {seed.text[:60]}",
             body_md=body,
             artifacts=[artifact],
             embedding_text=seed.text + " :: " + music_prompt[:300],
-            metadata={"generator": backend.name, "music_prompt": music_prompt},
+            metadata={"generator": artifact.generator, "music_prompt": music_prompt},
         )
 
     def _make_prompt(self, seed: Seed, ctx: ActivityContext) -> str:
@@ -77,12 +84,15 @@ class MusicRiffActivity:
             text = ""
         return text or seed.text
 
-    def _pick_backend(self, ctx: ActivityContext):
+    def _backends(self, ctx: ActivityContext):
+        """Available music backends in priority order; dry-run uses the stub only."""
         if ctx.dry_run:
-            stubs = [g for g in gens.available_for("music") if g.name.startswith("dryrun_")]
-            return stubs[0] if stubs else None
-        real = [g for g in gens.available_for("music") if not g.name.startswith("dryrun_")]
-        return real[0] if real else None
+            return [g for g in gens.available_for("music") if g.name.startswith("dryrun_")]
+        return [g for g in gens.available_for("music") if not g.name.startswith("dryrun_")]
+
+    def _pick_backend(self, ctx: ActivityContext):
+        backends = self._backends(ctx)
+        return backends[0] if backends else None
 
     def _render_body(
         self, seed: Seed, music_prompt: str, artifact, generator: str
