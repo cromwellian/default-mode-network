@@ -1,5 +1,9 @@
 """DMN exploration loop — the agent-modifiable file. Iterate on this to find better strategies.
 
+# rationale: v0.3   — pluggable activities (research / code_sketch / app_idea / ... );
+#                     --activities / --activity-mix select the eligible mix;
+#                     --execute + --sandbox enable code-running activities;
+#                     default (no flags) preserves v0.2.1 research-only behavior.
 # rationale: v0.1.2 — seeds use cluster.meta.theme / .subtopics (synthesized by labeling.py)
 #                     instead of raw labels; cross_pollinate picks the most-distant pair;
 #                     journal frontmatter records seed_subtopic when applicable.
@@ -27,18 +31,12 @@ except Exception:
     pass
 
 from dmn import __version__
+from dmn import activities as acts
 from dmn import embeddings as emb
 from dmn import generators as gens
 from dmn import journal, seeds, store, taste
+from dmn.activities import ActivityContext, ActivityResult
 from dmn.llm import get_llm
-from dmn.loop import (
-    SAFE_TOOLS,
-    SYNTHESIS_SYSTEM,
-    execute_tools,
-    parse_synthesis,
-    plan_tools,
-)
-from dmn.tools import ResearchItem
 
 console = Console()
 
@@ -74,10 +72,36 @@ def main(
         "--seed",
         help="Single explicit seed (overrides generators for the first iter).",
     ),
+    activities: str = typer.Option(
+        "research",
+        "--activities",
+        help="Comma-separated activities to enable (default: research).",
+    ),
+    activity_mix: Optional[str] = typer.Option(
+        None,
+        "--activity-mix",
+        help="Weighted activity mix, e.g. 'research:5,code_sketch:2,app_idea:1'. "
+        "Overrides --activities when set.",
+    ),
+    execute: bool = typer.Option(
+        False,
+        "--execute",
+        help="Allow code-generating activities to run their output (default off).",
+    ),
+    no_execute: bool = typer.Option(
+        False,
+        "--no-execute",
+        help="Alias for --sandbox none; disables code execution.",
+    ),
+    sandbox: str = typer.Option(
+        "subprocess",
+        "--sandbox",
+        help="Execution sandbox: 'subprocess' | 'docker' | 'none'.",
+    ),
     generate: bool = typer.Option(
         False,
         "--generate",
-        help="Also call generative-media tools (image/music/video) per brief.",
+        help="Also call generative-media tools (image/music/video) per brief (legacy v0.1.1).",
     ),
     modalities: str = typer.Option(
         "image,music,video",
@@ -99,6 +123,17 @@ def main(
             f"Generators: [bold]on[/] (modalities: {sorted(enabled_modalities)})"
         )
 
+    sandbox_mode = "none" if no_execute else sandbox
+    if execute and sandbox_mode == "none":
+        console.print("[yellow]--execute requested but --sandbox none; ignoring --execute[/]")
+        execute = False
+    mix = (
+        acts.parse_mix(activity_mix)
+        if activity_mix
+        else acts.parse_mix(activities)
+    )
+    console.print(f"Activity mix: {mix}  · execute={execute} sandbox={sandbox_mode}")
+
     conn = store.connect()
     interests = store.list_interests(conn)
     clusters = store.list_clusters(conn)
@@ -117,6 +152,19 @@ def main(
         r["embedding"] for r in recent_findings if r["embedding"] is not None
     ]
 
+    ctx = ActivityContext(
+        llm=llm,
+        embed_fn=emb.embed,
+        clusters=clusters,
+        centroids=centroids,
+        recent_embs=recent_embs,
+        rng=rng,
+        dry_run=dry_run,
+        execute=execute,
+        sandbox=sandbox_mode,
+        verbose=verbose,
+    )
+
     deadline = time.time() + minutes * 60 if minutes else None
     n_done = 0
 
@@ -133,97 +181,74 @@ def main(
                 clusters, llm, rng, store.list_journal(conn, limit=10)
             )
 
+        cluster_label = _nearest_cluster_label(clusters, centroids, chosen_seed.text)
+        activity = acts.pick_activity(mix, ctx, rng, cluster_label=cluster_label)
+        if activity is None:
+            console.print("[red]  no activity available; aborting[/]")
+            break
+
         console.print(
             Panel(
                 f"[bold]Seed:[/] {chosen_seed.text}\n"
-                f"[dim]source: {chosen_seed.source}[/]",
+                f"[dim]source: {chosen_seed.source}  · activity: {activity.name}[/]",
                 border_style="cyan",
             )
         )
 
-        plan = plan_tools(chosen_seed.text, llm, dry_run, rng)
-        console.print(f"  using tools: {plan or '(none available)'}")
-
-        items = execute_tools(
-            plan,
-            chosen_seed.text,
-            verbose=verbose,
-            log=console.print if verbose else None,
-        )
-        if not items:
-            console.print("[yellow]  (no results, skipping)[/]")
+        try:
+            result: ActivityResult = activity.run(chosen_seed, ctx)
+        except Exception as e:
+            console.print(f"[red]  activity {activity.name} crashed: {e}[/]")
             n_done += 1
             continue
 
-        item_embs = emb.embed(
-            [(i.title or "") + " — " + (i.summary or "") for i in items]
-        )
-        for it, v in zip(items, item_embs):
-            it.embedding = v
+        if not (result.body_md or "").strip():
+            console.print("[yellow]  (empty body, skipping)[/]")
+            n_done += 1
+            continue
 
-        scored: list[tuple[float, dict, ResearchItem]] = []
-        for it in items:
-            d = taste.dopamine(it.embedding, centroids, recent_embs, rng)
-            scored.append((d["total"], d, it))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        top_k = scored[:5]
-
-        bullets: list[str] = []
-        for _, d, it in top_k:
-            bullets.append(
-                f"- [{it.source}] **{it.title}** — {it.summary[:240]}\n"
-                f"  {it.url}\n"
-                f"  dopamine: {d}"
-            )
-        gathered = "\n".join(bullets)
-        prompt = (
-            f"Seed question: {chosen_seed.text}\n\n"
-            f"Gathered findings:\n{gathered}\n\n"
-            "Write the brief now."
-        )
-        try:
-            resp = llm.complete(
-                system=SYNTHESIS_SYSTEM, user=prompt, max_tokens=800
-            )
-            raw_body = (resp.text or "").strip()
-        except Exception as e:
-            if verbose:
-                console.print(f"[yellow]  LLM error: {e}[/]")
-            raw_body = f"_(synthesis failed; raw findings)_\n\n{gathered}"
-        body, entities, rabbit_holes = parse_synthesis(raw_body)
-
-        brief_emb = emb.embed([chosen_seed.text + " :: " + body[:1000]])[0]
+        # Score the brief itself for dopamine + persistence.
+        embedding_text = result.embedding_text or chosen_seed.text
+        brief_emb = emb.embed([embedding_text[:1500]])[0]
         d_brief = taste.dopamine(brief_emb, centroids, recent_embs, rng)
 
+        # Pre-v0.3 image/music/video legacy path; off unless --generate is set.
         artifact_meta: Optional[dict] = None
-        if generate:
-            label = _label_for_top_cluster(clusters, centroids, brief_emb)
+        if generate and activity.name == "research":
             artifact_meta = _maybe_generate(
-                label, chosen_seed.text, body, enabled_modalities, dry_run, verbose
+                cluster_label, chosen_seed.text, result.body_md,
+                enabled_modalities, dry_run, verbose,
             )
 
+        artifacts_dicts = [_artifact_to_dict(a) for a in result.artifacts]
         path = journal.write_brief(
             seed=chosen_seed.text,
-            body=body,
+            body=result.body_md,
             dopamine=d_brief,
             seed_source=chosen_seed.source,
             seed_subtopic=getattr(chosen_seed, "subtopic", None),
-            tools=plan,
+            tools=result.metadata.get("tools") or [],
             artifact=artifact_meta,
+            activity=activity.name,
+            artifacts=artifacts_dicts or None,
+            execution=result.execution,
         )
         store.add_journal(
             conn,
             chosen_seed.text,
             chosen_seed.source,
-            plan,
+            result.metadata.get("tools") or [],
             d_brief,
             str(path),
             brief_emb,
-            entities=entities,
-            rabbit_holes=rabbit_holes,
+            entities=result.metadata.get("entities"),
+            rabbit_holes=result.metadata.get("rabbit_holes"),
+            activity=activity.name,
+            artifact_paths=[str(a.bytes_path) for a in result.artifacts if a.bytes_path],
+            execution_result=result.execution,
         )
         store.add_finding(
-            conn, chosen_seed.text + " :: " + body[:200], brief_emb
+            conn, chosen_seed.text + " :: " + result.body_md[:200], brief_emb
         )
         recent_embs.append(brief_emb)
 
@@ -235,13 +260,16 @@ def main(
                 store.update_cluster(conn, clusters[best]["id"], new_c)
                 centroids[best] = new_c
 
-        suffix = (
-            f"  artifact={artifact_meta['bytes_path']}"
-            if artifact_meta and artifact_meta.get("bytes_path")
-            else ""
-        )
+        suffix = ""
+        if artifact_meta and artifact_meta.get("bytes_path"):
+            suffix = f"  artifact={artifact_meta['bytes_path']}"
+        elif result.artifacts:
+            suffix = f"  artifacts={len(result.artifacts)}"
+        if result.execution is not None:
+            suffix += f"  exec={result.execution.get('exit_code')}"
         console.print(
-            f"[green]  brief:[/] {path}  dopamine={d_brief['total']:.3f}{suffix}"
+            f"[green]  brief:[/] {path}  dopamine={d_brief['total']:.3f}  "
+            f"activity={activity.name}{suffix}"
         )
         n_done += 1
 
@@ -261,7 +289,7 @@ def main(
     )
     for e in top:
         console.print(
-            f"  - {e['dopamine_total']:.3f}  [{e['seed_source']}] "
+            f"  - {e['dopamine_total']:.3f}  [{e['seed_source']}/{e.get('activity') or 'research'}] "
             f"{e['seed']} -> {e['path']}"
         )
     console.print(f"\nMorning rollup: [dim]journal/today.md[/]")
@@ -288,13 +316,21 @@ def _pick_seed(
     return seeds.drift(recent, llm, rng)
 
 
-def _label_for_top_cluster(
-    clusters: list[dict], centroids: list[np.ndarray], brief_emb: np.ndarray
+def _nearest_cluster_label(
+    clusters: list[dict], centroids: list[np.ndarray], seed_text: str
 ) -> str:
-    """Return the human-readable label of the cluster nearest to a brief's embedding."""
+    """Return the label of the cluster whose centroid best matches the seed text.
+
+    Used to nudge `acts.pick_activity` toward modality-appropriate activities (e.g. a
+    music cluster lightly boosts `music_riff`).
+    """
     if not centroids or not clusters:
         return ""
-    idx = taste.best_cluster_index(centroids, brief_emb) or 0
+    try:
+        seed_emb = emb.embed([seed_text])[0]
+    except Exception:
+        return ""
+    idx = taste.best_cluster_index(centroids, seed_emb) or 0
     if idx >= len(clusters):
         return ""
     return clusters[idx].get("label") or ""
@@ -308,7 +344,7 @@ def _maybe_generate(
     dry_run: bool,
     verbose: bool,
 ) -> Optional[dict]:
-    """Pick a generator for the cluster label and produce one artifact, if a backend is available."""
+    """Legacy v0.1.1 generator pipeline (only triggered by --generate). Activities are preferred."""
     candidates = gens.pick_for_cluster(cluster_label, dry_run=dry_run)
     candidates = [g for g in candidates if g.modality in enabled]
     if not candidates:
@@ -318,7 +354,6 @@ def _maybe_generate(
             )
         return None
     gen = candidates[0]
-    # Use the seed + first sentence of the brief as a more visual prompt.
     visual_prompt = (prompt_seed + ". " + brief_body[:200]).strip()
     try:
         artifact = gen.generate(visual_prompt)

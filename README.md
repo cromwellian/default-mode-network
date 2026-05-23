@@ -31,7 +31,8 @@ The repo is deliberately small and only a few files matter:
 
 - **`prepare.py`** — one-time setup. Runs an interview, optionally imports browser history / Google Takeout / Twitter likes, embeds the interest items, k-means clusters them into "taste clusters", and writes everything to `data/dmn.sqlite`. Edit if you want; doesn't change much per run.
 - **`explore.py`** — the single agent-modifiable file, analogous to karpathy's `train.py`. The wandering loop: pick a seed, plan tools, search, score with the dopamine function, synthesize a brief, log it. **The agent is encouraged to iterate on this file** — try different seed-picking strategies, different ratios of cluster vs. cross-pollination, different synthesis prompts, etc.
-- **`wander.py`** *(v0.2)* — a sibling entry point that runs best-first **tree-search** instead of flat exploration. Each high-dopamine brief gets expanded via mutation operators (`drift` / `deepen` / `branch` / `retool`); a `Pruner` kills low-scoring or near-duplicate children; dopamine backprops up the ancestor chain so a deep promising finding can rescue a meh-looking root. Per-session tree visualized in `journal/tree.md` as a Mermaid graph. Flat mode (`explore.py`) is unchanged.
+- **`wander.py`** *(v0.2)* — a sibling entry point that runs best-first **tree-search** instead of flat exploration. Each high-dopamine brief gets expanded via mutation operators (`drift` / `deepen` / `branch` / `retool` / `modality_switch`); a `Pruner` kills low-scoring or near-duplicate children; dopamine backprops up the ancestor chain so a deep promising finding can rescue a meh-looking root. Per-session tree visualized in `journal/tree.md` as a Mermaid graph. Flat mode (`explore.py`) is unchanged.
+- **Activities** *(v0.3)* — both `explore.py` and `wander.py` accept `--activities` and `--activity-mix` to choose what the wander *does* with each seed: research it, sketch code about it, design an app around it, riff visually, etc. Default is `research` (research-only, byte-identical to v0.2.1 behavior).
 - **`program.md`** — the agent skill: what to do when invoked. Point Claude/Codex/Cursor here.
 - **`dmn/`** — the boring stable plumbing: storage, embeddings, LLM providers, tools, importers. Don't modify unless you know why.
 
@@ -110,6 +111,55 @@ For a fully-local run with no data leaving your laptop:
 DMN_LLM_PROVIDER=ollama DMN_EMBEDDINGS=st uv run explore.py
 ```
 
+## Activities — what does the mind wander on?
+
+v0.3 turns the wander loop into a registry of pluggable **activities**. Each activity
+takes a seed and returns a brief (markdown body) plus optional disk artifacts. Per-iter
+the loop samples one activity from your `--activity-mix` (weighted), runs it, scores
+the brief for dopamine, and writes it to the journal exactly like a research brief.
+
+| activity            | what it does                                                          | needs                                  |
+| ------------------- | --------------------------------------------------------------------- | -------------------------------------- |
+| `research`          | The classic flow: search → score → synthesize a 5-bullet brief.        | (none — works with stub LLM)            |
+| `code_sketch`       | LLM writes a ≤100-line stdlib+numpy Python sketch; optionally runs it.| (none; +`--execute` for sandbox run)    |
+| `app_idea`          | 1-page markdown PRD + Mermaid architecture diagram + risks.            | (none)                                  |
+| `algorithm_explore` | Picks an adjacent algorithm, writes a tiny demo + ASCII / matplotlib.  | (`matplotlib` extra; degrades to ASCII) |
+| `ml_experiment`     | Tiny torch experiment, ≤200 lines, ≤30s on CPU, prints `METRIC: ...`.  | (`torch` extra)                         |
+| `image_riff`        | LLM rewrites the seed as a visual prompt, calls an image backend.      | `GOOGLE_API_KEY` *or* `REPLICATE_API_TOKEN` |
+| `music_riff`        | LLM rewrites the seed as musical direction, calls an audio backend.    | `STABILITY_API_KEY` (Stable Audio 2.0) or Lyria/Suno when public |
+| `video_riff`        | Same shape as image; off by default in any sane mix (latency).         | `REPLICATE_API_TOKEN`                   |
+| `mood_journal`      | Reflective ~200-word journal entry over your top clusters.             | (none)                                  |
+
+Examples:
+
+```bash
+# Default: research-only, byte-identical to v0.2.1
+uv run wander.py --iterations 12
+
+# Code-curious: research + sketches + app PRDs, with sandboxed execution
+uv run wander.py --activities research,code_sketch,app_idea --iterations 12 --execute
+
+# Multimodal: research + image riffs (works with GOOGLE_API_KEY set)
+uv run wander.py --activity-mix research:3,image_riff:1 --iterations 8
+
+# The works
+uv run wander.py \
+  --activity-mix research:4,code_sketch:2,app_idea:1,algorithm_explore:1,image_riff:1,music_riff:1 \
+  --execute --iterations 20
+```
+
+`--execute` is opt-in. It runs code-generating activities under `--sandbox subprocess`
+(default), `--sandbox docker` (requires Docker), or `--sandbox none`. The default
+subprocess mode strips all `*_API_KEY` / `*_TOKEN` / `*_SECRET` env vars from the child,
+so even a hostile LLM-generated script can't see your credentials. Run
+`uv run python -c "from dmn.sandbox import run_python; ..."` if you want to test it.
+
+`mutate_modality_switch` (v0.3) is a new tree-mode mutation that keeps the parent's
+seed but switches the activity. So a research brief on "RLHF preference datasets" can
+spawn a `code_sketch` child that implements a tiny preference-pair sampler — that's
+the wandering-across-modalities pattern, in the tree. It only fires when
+`--activities` / `--activity-mix` lists more than one activity.
+
 ## Multimodal: generative-media artifacts
 
 DMN can optionally call generative-media tools (image, music, video) at the end of each
@@ -127,7 +177,10 @@ modality based on the env you have configured):
 | -------- | --------------- | -------------------------------------- | -------------------------------------- |
 | image    | `nano_banana`   | `GOOGLE_API_KEY` / `GEMINI_API_KEY`    | Gemini 2.5 Flash Image                 |
 | image    | `replicate_image` | `REPLICATE_API_TOKEN`                | default model: `black-forest-labs/flux-schnell` (override via `DMN_IMAGE_MODEL_REPLICATE`) |
+| music    | `stable_audio`  | `STABILITY_API_KEY`                    | Stable Audio 2.0 (`/v2beta/audio/...`) |
 | music    | `lyria`         | `GOOGLE_API_KEY`                       | Lyria 2 — currently allow-listed; stub returns "unavailable" |
+| music    | `suno`          | `SUNO_API_KEY`                         | Stub until upstream API is public      |
+| video    | `replicate_video` | `REPLICATE_API_TOKEN`                | default model: `lucataco/animate-diff` (override via `DMN_VIDEO_MODEL_REPLICATE`) |
 | video    | `video_stub`    | (none)                                  | placeholder; Veo 3 / Sora / Runway / Kling adapters drop in here |
 | (any)    | `dryrun_*`      | (none)                                  | tiny placeholder files for `--dry-run` |
 
@@ -211,14 +264,16 @@ dmn/                  — plumbing
   seeds.py            — seed-question generators (cold/cluster/cross/drift/trending)
   labeling.py         — LLM-synthesized cluster themes + per-interest tags
   loop.py             — shared synthesis prompt + tool planner + tool runner (v0.2)
-  tree.py             — Frontier / Pruner / UCB / backprop / mutation operators (v0.2)
+  tree.py             — Frontier / Pruner / UCB / backprop / mutation operators (v0.2/v0.3)
+  sandbox.py          — subprocess / docker code execution with env stripping (v0.3)
   embeddings.py       — sentence-transformers + openai backends + hash fallback
   llm.py              — anthropic / openai / ollama / lmstudio / stub providers
-  store.py            — SQLite schema + helpers (v3 includes journal tree-search columns)
-  journal.py          — markdown brief writer + index + today's notebook + tree.md (v0.2)
-  portability.py      — schema-v3 profile.dmn.json serialization
+  store.py            — SQLite schema + helpers (v5 adds journal activity / artifacts / execution)
+  journal.py          — markdown brief writer + index + today's notebook + tree.md (v0.2/v0.3)
+  portability.py      — schema-v5 profile.dmn.json serialization
+  activities/         — pluggable wander activities (research/code/app/algorithm/ml/image/music/video/mood) (v0.3)
   tools/              — pluggable search backends (arxiv, wikipedia, ddg, hn, reddit, ...)
-  generators/         — pluggable generative-media backends (nano-banana, replicate, lyria, ...)
+  generators/         — pluggable generative-media backends (nano-banana, replicate, stable-audio, ...)
   importers/          — browser history, takeout, twitter export, csv
 data/                 — local-only sqlite + artifacts + caches (gitignored)
 journal/              — generated briefs (gitignored)

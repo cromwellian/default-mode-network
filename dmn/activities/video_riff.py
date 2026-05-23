@@ -1,0 +1,100 @@
+"""`video_riff` activity (v0.3, stub-grade): turn the seed into a short cinematic clip.
+
+Available iff `REPLICATE_API_TOKEN` is set (via `dmn.generators.video_replicate`). High
+latency makes this a poor default for routine wanders, so the activity defaults to off
+in any sensible mix.
+"""
+from __future__ import annotations
+
+from dmn import generators as gens
+from dmn.activities import ActivityContext, ActivityResult, register
+from dmn.seeds import Seed
+
+VIDEO_SYSTEM = (
+    "You translate research seeds into one-paragraph cinematic-direction prompts for a "
+    "text-to-video model. Specify subject, camera move, lighting, mood, and pacing."
+)
+
+
+class VideoRiffActivity:
+    """Cinematic prompt → video (Replicate / dry-run stub)."""
+
+    name = "video_riff"
+    requires_llm = False
+    requires_keys: list[str] = []
+    requires_extras: list[str] = []
+
+    def available(self, ctx: ActivityContext) -> bool:
+        if ctx.dry_run:
+            return any(g for g in gens.available_for("video") if g.name.startswith("dryrun_"))
+        real = [g for g in gens.available_for("video") if not g.name.startswith("dryrun_")]
+        return len(real) > 0
+
+    def run(self, seed: Seed, ctx: ActivityContext) -> ActivityResult:
+        prompt = self._make_prompt(seed, ctx)
+        backend = self._pick_backend(ctx)
+        if backend is None:
+            return ActivityResult(
+                title=f"Video (skipped): {seed.text[:60]}",
+                body_md=(
+                    f"## Video riff\n\n**Seed:** {seed.text}\n\n"
+                    "_(no video backend available)_"
+                ),
+                embedding_text=seed.text,
+                metadata={"skipped": True},
+            )
+        try:
+            artifact = backend.generate(prompt)
+        except Exception as e:
+            return ActivityResult(
+                title=f"Video (failed): {seed.text[:60]}",
+                body_md=(
+                    f"## Video riff\n\n**Seed:** {seed.text}\n\n"
+                    f"_(generator `{backend.name}` failed: {e})_"
+                ),
+                embedding_text=seed.text,
+                metadata={"error": str(e)},
+            )
+        target = artifact.bytes_path or artifact.url or ""
+        body = "\n".join(
+            [
+                f"## Video riff: {seed.text}",
+                "",
+                f"**Generator:** `{backend.name}`",
+                "",
+                "### Cinematic direction",
+                "",
+                f"> {prompt}",
+                "",
+                f"[Watch]({target})" if target else "_(no output bytes)_",
+            ]
+        )
+        return ActivityResult(
+            title=f"Video: {seed.text[:60]}",
+            body_md=body,
+            artifacts=[artifact],
+            embedding_text=seed.text + " :: " + prompt[:300],
+            metadata={"generator": backend.name, "video_prompt": prompt},
+        )
+
+    def _make_prompt(self, seed: Seed, ctx: ActivityContext) -> str:
+        try:
+            resp = ctx.llm.complete(
+                system=VIDEO_SYSTEM,
+                user=f"Seed: {seed.text}\n\nWrite the cinematic direction now.",
+                max_tokens=200,
+            )
+            text = (resp.text or "").strip()
+        except Exception:
+            text = ""
+        return text or seed.text
+
+    def _pick_backend(self, ctx: ActivityContext):
+        if ctx.dry_run:
+            stubs = [g for g in gens.available_for("video") if g.name.startswith("dryrun_")]
+            return stubs[0] if stubs else None
+        real = [g for g in gens.available_for("video") if not g.name.startswith("dryrun_")]
+        return real[0] if real else None
+
+
+register(VideoRiffActivity())

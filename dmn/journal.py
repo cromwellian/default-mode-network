@@ -28,6 +28,9 @@ def write_brief(
     mutation: str | None = None,
     depth: int | None = None,
     status: str | None = None,
+    activity: str | None = None,
+    artifacts: list[dict] | None = None,
+    execution: dict | None = None,
     journal_dir: Path | str = JOURNAL_DIR,
 ) -> Path:
     """Write a markdown brief file with YAML frontmatter; returns the new path.
@@ -70,13 +73,30 @@ def write_brief(
         fm_parts.append(f"depth: {int(depth)}")
     if status is not None:
         fm_parts.append(f"status: {status}")
+    if activity is not None:
+        fm_parts.append(f"activity: {activity}")
     if artifact:
         fm_parts.append(f"artifact: {json.dumps(artifact)}")
+    if artifacts:
+        # serialize each artifact dict; the activity emitted dicts already
+        fm_parts.append(f"artifacts: {json.dumps(artifacts)}")
+    if execution is not None:
+        # full sandbox result; useful for downstream tooling
+        fm_parts.append(f"execution: {json.dumps(execution)}")
     fm_parts.extend(["---", "", ""])
     fm = "\n".join(fm_parts)
     body_text = (body or "").rstrip()
     if artifact:
         body_text = body_text + "\n\n" + _render_artifact_md(artifact)
+    if artifacts:
+        # Activities pass dicts; embed each at the foot of the body.
+        embed_lines: list[str] = []
+        for a in artifacts:
+            md = _render_artifact_md(a)
+            if md:
+                embed_lines.append(md)
+        if embed_lines:
+            body_text = body_text + "\n\n" + "\n\n".join(embed_lines)
     path.write_text(fm + body_text + "\n")
     return path
 
@@ -146,7 +166,10 @@ def write_index(
             seed = e.get("seed", "?")
             score = e.get("dopamine_total") or 0.0
             tools = ", ".join(e.get("tools") or [])
-            lines.append(f"- **{score:.3f}** — [{seed}]({path}) — _{tools}_")
+            activity = e.get("activity") or "research"
+            lines.append(
+                f"- **{score:.3f}** _[{activity}]_ — [{seed}]({path}) — _{tools}_"
+            )
         lines.append("")
     if roots:
         lines.append("## Tree mode")
@@ -168,10 +191,11 @@ def _emit_tree_entry(
     seed = node.get("seed", "?")
     score = node.get("dopamine_total") or 0.0
     mutation = node.get("mutation") or "root"
+    activity = node.get("activity") or "research"
     status = node.get("status") or "open"
     status_tag = "" if status == "open" else f" _[{status}]_"
     lines.append(
-        f"{indent}- **{score:.3f}** _({mutation})_ — [{seed}]({path}){status_tag}"
+        f"{indent}- **{score:.3f}** _({mutation}/{activity})_ — [{seed}]({path}){status_tag}"
     )
     kids = sorted(
         children_of.get(int(node.get("id")), []),
@@ -253,7 +277,7 @@ def _render_entity_graph_section(nodes: list[dict]) -> str:
 def write_today_notebook(
     entries: list[dict], journal_dir: Path | str = JOURNAL_DIR
 ) -> Path:
-    """Write journal/today.md: rollup of last-24h briefs sorted by dopamine."""
+    """Write journal/today.md: rollup of last-24h briefs + an activity-breakdown block (v0.3)."""
     out_dir = Path(journal_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     today = dt.date.today()
@@ -266,11 +290,23 @@ def write_today_notebook(
         f"_{len(recent)} brief(s) from the last 24 hours, top first._",
         "",
     ]
+    breakdown = _activity_breakdown(recent)
+    if breakdown:
+        lines.append("## Activity breakdown")
+        lines.append("")
+        lines.append("| activity | count | mean dopamine |")
+        lines.append("|:---------|------:|--------------:|")
+        for name, count, mean in breakdown:
+            lines.append(f"| {name} | {count} | {mean:.3f} |")
+        lines.append("")
     for e in recent:
         path = e.get("path", "")
         seed = e.get("seed", "?")
         score = e.get("dopamine_total") or 0.0
-        lines.append(f"\n## [{seed}]({path}) — dopamine {score:.3f}")
+        activity = e.get("activity") or "research"
+        lines.append(
+            f"\n## [{seed}]({path}) — dopamine {score:.3f} _[{activity}]_"
+        )
         lines.append("")
         body_preview = _read_body_preview(path)
         if body_preview:
@@ -279,6 +315,20 @@ def write_today_notebook(
     out = out_dir / "today.md"
     out.write_text("\n".join(lines) + "\n")
     return out
+
+
+def _activity_breakdown(entries: list[dict]) -> list[tuple[str, int, float]]:
+    """Return [(activity, count, mean_dopamine)] sorted by count desc."""
+    by: dict[str, list[float]] = {}
+    for e in entries:
+        name = e.get("activity") or "research"
+        by.setdefault(name, []).append(float(e.get("dopamine_total") or 0.0))
+    rows = [
+        (name, len(scores), sum(scores) / len(scores))
+        for name, scores in by.items()
+    ]
+    rows.sort(key=lambda r: -r[1])
+    return rows
 
 
 def _read_body_preview(path: str, max_lines: int = 6) -> str:

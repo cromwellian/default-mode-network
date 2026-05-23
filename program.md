@@ -38,14 +38,43 @@ LM Studio app running its local server). DMN does a 2-second health-check agains
 local base URL on startup and prints a friendly hint if the server is unreachable. If
 nothing is configured, DMN falls back to the stub LLM.
 
-### Generative-media artifacts (optional)
+### Activities (v0.3)
 
-To attach an image / music / video artifact to each brief:
+By default `explore.py` and `wander.py` only run the `research` activity — same flow
+as v0.2.1. To diversify what the wander *does*, pass `--activities` or `--activity-mix`:
+
+```
+# code-curious wander
+uv run explore.py --activities research,code_sketch,app_idea --execute --iterations 8
+
+# multi-modal wander (music or images, gated by env keys)
+uv run wander.py --activity-mix research:3,image_riff:1,music_riff:1 --iterations 12
+```
+
+Available activities: `research` (default), `code_sketch`, `app_idea`,
+`algorithm_explore`, `ml_experiment`, `image_riff`, `music_riff`, `video_riff`,
+`mood_journal`. When the user is curious about a topic, suggest mixing in
+`--activities research,code_sketch` so the agent doesn't only return text briefs.
+
+`--execute` enables sandboxed code execution for `code_sketch` / `algorithm_explore`
+/ `ml_experiment`. Default sandbox is `subprocess` with a strict env-strip (no `*_API_KEY`
+/ `*_TOKEN` / `*_SECRET` reach the child). Use `--sandbox docker` for stronger
+isolation if the user has Docker, or `--no-execute` to disable execution entirely.
+
+Several activities require additional env keys:
+- `image_riff`: `GOOGLE_API_KEY` (Nano Banana) or `REPLICATE_API_TOKEN` (Flux Schnell).
+- `music_riff`: `STABILITY_API_KEY` (Stable Audio 2.0); Lyria/Suno are gated stubs.
+- `video_riff`: `REPLICATE_API_TOKEN`. Off-by-default in any sane mix (latency).
+
+### Generative-media artifacts (legacy v0.1.1, still works)
+
+To attach an image / music / video artifact to a *research* brief:
 
 ```
 uv run explore.py --generate --modalities image,music
 ```
 
+This is the v0.1.1 path; for v0.3+, prefer `--activities image_riff,music_riff`.
 Generators are OFF by default. `--modalities` is a CSV; default is all three when
 `--generate` is set. The first available generator whose modality matches the brief's
 top taste cluster (heuristically: labels containing "art"/"design"/"photo" → image;

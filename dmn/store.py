@@ -64,7 +64,7 @@ def _vec_from_json(s: Optional[str]) -> Optional[np.ndarray]:
     return np.asarray(json.loads(s), dtype=np.float32)
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -73,6 +73,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     v2: clusters.meta + interests.tags
     v3: journal tree-search columns (parent_id, mutation, depth, status, subtree_score)
     v4: journal entity-tagging columns (entities, rabbit_holes — both JSON TEXT)
+    v5: journal activity columns (activity, artifact_paths, execution_result)
     """
     for sql in [
         # v2
@@ -87,6 +88,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # v4 — entity tagging on brief synthesis (powers mutate_deepen)
         "ALTER TABLE journal ADD COLUMN entities TEXT",
         "ALTER TABLE journal ADD COLUMN rabbit_holes TEXT",
+        # v5 — pluggable wander activities
+        "ALTER TABLE journal ADD COLUMN activity TEXT",
+        "ALTER TABLE journal ADD COLUMN artifact_paths TEXT",
+        "ALTER TABLE journal ADD COLUMN execution_result TEXT",
     ]:
         try:
             conn.execute(sql)
@@ -237,7 +242,7 @@ def update_cluster_label(
 _JOURNAL_COLUMNS = (
     "id, seed, seed_source, tools, dopamine_total, dopamine_breakdown, "
     "path, embedding, created_at, parent_id, mutation, depth, status, "
-    "subtree_score, entities, rabbit_holes"
+    "subtree_score, entities, rabbit_holes, activity, artifact_paths, execution_result"
 )
 
 
@@ -260,6 +265,9 @@ def _row_to_journal(row: tuple) -> dict:
         "subtree_score": row[13],
         "entities": json.loads(row[14]) if row[14] else [],
         "rabbit_holes": json.loads(row[15]) if row[15] else [],
+        "activity": row[16],
+        "artifact_paths": json.loads(row[17]) if row[17] else [],
+        "execution_result": json.loads(row[18]) if row[18] else None,
     }
 
 
@@ -277,6 +285,9 @@ def add_journal(
     status: str = "open",
     entities: Optional[list] = None,
     rabbit_holes: Optional[list] = None,
+    activity: Optional[str] = None,
+    artifact_paths: Optional[list] = None,
+    execution_result: Optional[dict] = None,
 ) -> int:
     """Record a brief in the journal index; returns its row id.
 
@@ -286,14 +297,21 @@ def add_journal(
 
     v0.2.1 adds `entities` and `rabbit_holes` (lists, default empty); these power
     `mutate_deepen` / `mutate_branch` on subsequent expansions.
+
+    v0.3 adds `activity` ('research' | 'code_sketch' | ... ), `artifact_paths` (list of
+    string disk paths produced by the activity), and `execution_result` (sandbox result
+    dict, when --execute was on).
     """
     entities_json = json.dumps(entities) if entities else None
     rabbit_holes_json = json.dumps(rabbit_holes) if rabbit_holes else None
+    artifact_paths_json = json.dumps(artifact_paths) if artifact_paths else None
+    execution_json = json.dumps(execution_result) if execution_result else None
     cur = conn.execute(
         "INSERT INTO journal(seed, seed_source, tools, dopamine_total, "
         "dopamine_breakdown, path, embedding, created_at, "
-        "parent_id, mutation, depth, status, subtree_score, entities, rabbit_holes) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "parent_id, mutation, depth, status, subtree_score, entities, rabbit_holes, "
+        "activity, artifact_paths, execution_result) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             seed,
             seed_source,
@@ -310,10 +328,25 @@ def add_journal(
             float(dopamine.get("total", 0.0)),
             entities_json,
             rabbit_holes_json,
+            activity,
+            artifact_paths_json,
+            execution_json,
         ),
     )
     conn.commit()
     return cur.lastrowid
+
+
+def list_journal_by_activity(
+    conn: sqlite3.Connection, name: str, limit: int = 50
+) -> list[dict]:
+    """Return recent journal entries for a single activity, newest first."""
+    rows = conn.execute(
+        f"SELECT {_JOURNAL_COLUMNS} FROM journal WHERE activity = ? "
+        "ORDER BY created_at DESC LIMIT ?",
+        (name, limit),
+    ).fetchall()
+    return [_row_to_journal(r) for r in rows]
 
 
 def get_entities(conn: sqlite3.Connection, journal_id: int) -> list[dict]:

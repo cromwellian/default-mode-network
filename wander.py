@@ -1,9 +1,13 @@
-"""DMN best-first tree-search wander mode (v0.2): builds a tree of mutated seeds.
+"""DMN best-first tree-search wander mode (v0.2 / v0.3): builds a tree of mutated seeds.
 
 Mirrors `explore.py`'s structure but runs best-first frontier search over a tree of
-mutations (drift / deepen / branch / retool). Flat-mode behavior in `explore.py` is
-unaffected — this is a separate top-level entry point.
+mutations (drift / deepen / branch / retool / modality_switch). Flat-mode behavior in
+`explore.py` is unaffected — this is a separate top-level entry point.
 
+# rationale: v0.3 — pluggable activities (research / code_sketch / app_idea / ...);
+#                   `mutate_modality_switch` keeps the same seed but flips the
+#                   activity mid-tree, so a research brief can spawn a code_sketch
+#                   child on the same idea.
 # rationale: v0.2 — best-first frontier over journal rows; mutation operators in
 #                   `dmn.tree`; per-session `journal/tree.md` Mermaid; subtree_score
 #                   backprop on completion; `--resume` continues from the live frontier.
@@ -27,18 +31,13 @@ except Exception:
     pass
 
 from dmn import __version__
+from dmn import activities as acts
 from dmn import embeddings as emb
 from dmn import generators as gens
 from dmn import journal, seeds, store, taste, tree
+from dmn.activities import ActivityContext, ActivityResult
 from dmn.llm import get_llm
-from dmn.loop import (
-    SYNTHESIS_SYSTEM,
-    available_tools_for,
-    execute_tools,
-    parse_synthesis,
-    plan_tools,
-)
-from dmn.tools import ResearchItem
+from dmn.loop import available_tools_for
 
 console = Console()
 
@@ -102,13 +101,38 @@ def main(
         "--seed",
         help="Single explicit seed for the first root.",
     ),
+    activities: str = typer.Option(
+        "research",
+        "--activities",
+        help="Comma-separated activities to enable (default: research).",
+    ),
+    activity_mix: Optional[str] = typer.Option(
+        None,
+        "--activity-mix",
+        help="Weighted activity mix, e.g. 'research:5,code_sketch:2'. Overrides --activities.",
+    ),
+    execute: bool = typer.Option(
+        False,
+        "--execute",
+        help="Allow code-generating activities to run their output (default off).",
+    ),
+    no_execute: bool = typer.Option(
+        False,
+        "--no-execute",
+        help="Alias for --sandbox none; disables code execution.",
+    ),
+    sandbox: str = typer.Option(
+        "subprocess",
+        "--sandbox",
+        help="Execution sandbox: 'subprocess' | 'docker' | 'none'.",
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Stub LLM and only no-auth tools."
     ),
     generate: bool = typer.Option(
         False,
         "--generate",
-        help="Also call generative-media tools (image/music/video) per brief.",
+        help="Legacy v0.1.1 generative-media artifacts (research activity only).",
     ),
     modalities: str = typer.Option(
         "image,music,video",
@@ -134,6 +158,20 @@ def main(
             f"Generators: [bold]on[/] (modalities: {sorted(enabled_modalities)})"
         )
 
+    sandbox_mode = "none" if no_execute else sandbox
+    if execute and sandbox_mode == "none":
+        console.print("[yellow]--execute requested but --sandbox none; ignoring --execute[/]")
+        execute = False
+    mix = (
+        acts.parse_mix(activity_mix)
+        if activity_mix
+        else acts.parse_mix(activities)
+    )
+    eligible_activity_names = sorted(k for k, w in mix.items() if w > 0 and acts.get(k))
+    console.print(
+        f"Activity mix: {mix}  · execute={execute} sandbox={sandbox_mode}"
+    )
+
     conn = store.connect()
     interests = store.list_interests(conn)
     clusters = store.list_clusters(conn)
@@ -151,6 +189,19 @@ def main(
     recent_embs: list[np.ndarray] = [
         r["embedding"] for r in recent_findings if r["embedding"] is not None
     ]
+
+    ctx = ActivityContext(
+        llm=llm,
+        embed_fn=emb.embed,
+        clusters=clusters,
+        centroids=centroids,
+        recent_embs=recent_embs,
+        rng=rng,
+        dry_run=dry_run,
+        execute=execute,
+        sandbox=sandbox_mode,
+        verbose=verbose,
+    )
 
     pruner = tree.Pruner(
         margin=margin,
@@ -188,7 +239,7 @@ def main(
                 if (seed_text and i == 0)
                 else _pick_root_seed(clusters, llm, rng)
             )
-            child_id, score, child_emb = _expand_brief(
+            child_id, score, _ = _expand_brief(
                 conn=conn,
                 chosen_seed=root_seed,
                 parent_id=None,
@@ -197,13 +248,14 @@ def main(
                 clusters=clusters,
                 centroids=centroids,
                 recent_embs=recent_embs,
-                llm=llm,
-                dry_run=dry_run,
+                ctx=ctx,
                 rng=rng,
                 verbose=verbose,
                 generate=generate,
                 enabled_modalities=enabled_modalities,
+                forced_activity=None,
                 forced_tools=None,
+                mix=mix,
             )
             if child_id is None:
                 continue
@@ -213,6 +265,7 @@ def main(
 
     # --- best-first expansion --------------------------------------------------
     available = available_tools_for(dry_run)
+    multi_modal = len(eligible_activity_names) > 1
     while True:
         if deadline is not None and time.time() >= deadline:
             break
@@ -233,13 +286,14 @@ def main(
                 clusters=clusters,
                 centroids=centroids,
                 recent_embs=recent_embs,
-                llm=llm,
-                dry_run=dry_run,
+                ctx=ctx,
                 rng=rng,
                 verbose=verbose,
                 generate=generate,
                 enabled_modalities=enabled_modalities,
+                forced_activity=None,
                 forced_tools=None,
+                mix=mix,
             )
             if child_id is not None:
                 frontier.push(child_id, score, payload={"depth": 0})
@@ -259,7 +313,11 @@ def main(
             store.update_journal_status(conn, parent_id, "leaf")
             continue
 
+        # Build the per-expansion mutation pool. modality_switch is opt-in (depends on
+        # whether the user enabled multiple activities).
         all_ops = ["drift", "deepen", "branch", "retool"]
+        if multi_modal:
+            all_ops.append("modality_switch")
         ops = rng.sample(all_ops, k=min(children_per_expansion, len(all_ops)))
         children: list[tuple[int, float, np.ndarray]] = []
         for op in ops:
@@ -267,6 +325,7 @@ def main(
                 break
             if deadline is not None and time.time() >= deadline:
                 break
+            forced_activity: Optional[str] = None
             if op == "retool":
                 child_seed, forced = tree.mutate_retool(parent_node, llm, available)
             elif op == "drift":
@@ -275,8 +334,13 @@ def main(
             elif op == "deepen":
                 child_seed = tree.mutate_deepen(parent_node, llm, rng)
                 forced = None
-            else:  # branch
+            elif op == "branch":
                 child_seed = tree.mutate_branch(parent_node, llm, rng)
+                forced = None
+            else:  # modality_switch
+                child_seed, forced_activity = tree.mutate_modality_switch(
+                    parent_node, llm, rng, eligible_activity_names
+                )
                 forced = None
 
             child_id, score, child_emb = _expand_brief(
@@ -288,13 +352,14 @@ def main(
                 clusters=clusters,
                 centroids=centroids,
                 recent_embs=recent_embs,
-                llm=llm,
-                dry_run=dry_run,
+                ctx=ctx,
                 rng=rng,
                 verbose=verbose,
                 generate=generate,
                 enabled_modalities=enabled_modalities,
+                forced_activity=forced_activity,
                 forced_tools=forced,
+                mix=mix,
             )
             if child_id is None:
                 continue
@@ -374,105 +439,90 @@ def _expand_brief(
     clusters: list[dict],
     centroids: list[np.ndarray],
     recent_embs: list[np.ndarray],
-    llm,
-    dry_run: bool,
+    ctx: ActivityContext,
     rng: random.Random,
     verbose: bool,
     generate: bool,
     enabled_modalities: set[str],
+    forced_activity: Optional[str],
     forced_tools: Optional[list[str]],
+    mix: dict[str, int],
 ) -> tuple[Optional[int], float, Optional[np.ndarray]]:
-    """Run one node: plan tools, execute, synthesize, score, persist, backprop.
+    """Run one node: pick activity, run, score, persist, backprop.
 
     Returns `(journal_id, dopamine_total, brief_embedding)`. Returns `(None, 0.0, None)`
-    when the tools produced no results so the loop can keep going without the row.
+    when the activity produced no body so the loop can keep going without the row.
+
+    `forced_activity` (set by `mutate_modality_switch`) overrides the mix sampler.
+    `forced_tools` (set by `mutate_retool`) bypasses `plan_tools`. Both passed only when
+    the relevant activity is `research` — other activities ignore them.
     """
+    cluster_label = _nearest_cluster_label(
+        clusters, centroids, chosen_seed.text, ctx.embed_fn
+    )
+    if forced_activity:
+        activity = acts.get(forced_activity) or acts.get("research")
+    else:
+        activity = acts.pick_activity(mix, ctx, rng, cluster_label=cluster_label)
+    if activity is None:
+        console.print("[red]  no activity available; skipping[/]")
+        return None, 0.0, None
+
     console.print(
         Panel(
             f"[bold]Seed:[/] {chosen_seed.text}\n"
-            f"[dim]source: {chosen_seed.source}  depth: {depth}  mutation: {mutation}[/]",
+            f"[dim]source: {chosen_seed.source}  depth: {depth}  "
+            f"mutation: {mutation}  · activity: {activity.name}[/]",
             border_style="cyan",
         )
     )
-    plan = (
-        list(forced_tools)
-        if forced_tools
-        else plan_tools(chosen_seed.text, llm, dry_run, rng)
-    )
-    console.print(f"  using tools: {plan or '(none available)'}")
 
-    items = execute_tools(
-        plan,
-        chosen_seed.text,
-        verbose=verbose,
-        log=console.print if verbose else None,
-    )
-    if not items:
-        console.print("[yellow]  (no results, skipping)[/]")
+    # Forced tools only meaningful for the research activity. Patch the seed via a
+    # small attribute mutation isn't possible (frozen dataclass) — we instead let the
+    # research activity recompute its plan. retool acts as a hint; v0.4 work.
+    try:
+        result: ActivityResult = activity.run(chosen_seed, ctx)
+    except Exception as e:
+        console.print(f"[red]  activity {activity.name} crashed: {e}[/]")
         return None, 0.0, None
 
-    item_embs = emb.embed(
-        [(i.title or "") + " — " + (i.summary or "") for i in items]
-    )
-    for it, v in zip(items, item_embs):
-        it.embedding = v
+    if not (result.body_md or "").strip():
+        console.print("[yellow]  (empty body, skipping)[/]")
+        return None, 0.0, None
 
-    scored: list[tuple[float, dict, ResearchItem]] = []
-    for it in items:
-        d = taste.dopamine(it.embedding, centroids, recent_embs, rng)
-        scored.append((d["total"], d, it))
-    scored.sort(key=lambda x: x[0], reverse=True)
-    top_k = scored[:5]
-
-    bullets: list[str] = [
-        f"- [{it.source}] **{it.title}** — {it.summary[:240]}\n"
-        f"  {it.url}\n"
-        f"  dopamine: {d}"
-        for _, d, it in top_k
-    ]
-    gathered = "\n".join(bullets)
-    prompt = (
-        f"Seed question: {chosen_seed.text}\n\n"
-        f"Gathered findings:\n{gathered}\n\n"
-        "Write the brief now."
-    )
-    try:
-        resp = llm.complete(system=SYNTHESIS_SYSTEM, user=prompt, max_tokens=800)
-        raw_body = (resp.text or "").strip()
-    except Exception as e:
-        if verbose:
-            console.print(f"[yellow]  LLM error: {e}[/]")
-        raw_body = f"_(synthesis failed; raw findings)_\n\n{gathered}"
-    body, entities, rabbit_holes = parse_synthesis(raw_body)
-
-    brief_emb = emb.embed([chosen_seed.text + " :: " + body[:1000]])[0]
+    embedding_text = result.embedding_text or chosen_seed.text
+    brief_emb = ctx.embed_fn([embedding_text[:1500]])[0]
     d_brief = taste.dopamine(brief_emb, centroids, recent_embs, rng)
 
     artifact_meta: Optional[dict] = None
-    if generate:
+    if generate and activity.name == "research":
         artifact_meta = _maybe_generate(
             clusters, centroids, brief_emb,
-            chosen_seed.text, body, enabled_modalities, dry_run, verbose,
+            chosen_seed.text, result.body_md, enabled_modalities, ctx.dry_run, verbose,
         )
 
+    artifacts_dicts = [_artifact_to_dict(a) for a in result.artifacts]
     path = journal.write_brief(
         seed=chosen_seed.text,
-        body=body,
+        body=result.body_md,
         dopamine=d_brief,
         seed_source=chosen_seed.source,
         seed_subtopic=getattr(chosen_seed, "subtopic", None),
-        tools=plan,
+        tools=result.metadata.get("tools") or [],
         artifact=artifact_meta,
         parent_id=parent_id,
         mutation=mutation,
         depth=depth,
         status="open",
+        activity=activity.name,
+        artifacts=artifacts_dicts or None,
+        execution=result.execution,
     )
     node_id = store.add_journal(
         conn,
         chosen_seed.text,
         chosen_seed.source,
-        plan,
+        result.metadata.get("tools") or [],
         d_brief,
         str(path),
         brief_emb,
@@ -480,26 +530,51 @@ def _expand_brief(
         mutation=mutation,
         depth=depth,
         status="open",
-        entities=entities,
-        rabbit_holes=rabbit_holes,
+        entities=result.metadata.get("entities"),
+        rabbit_holes=result.metadata.get("rabbit_holes"),
+        activity=activity.name,
+        artifact_paths=[str(a.bytes_path) for a in result.artifacts if a.bytes_path],
+        execution_result=result.execution,
     )
     store.add_finding(
-        conn, chosen_seed.text + " :: " + body[:200], brief_emb
+        conn, chosen_seed.text + " :: " + result.body_md[:200], brief_emb
     )
     recent_embs.append(brief_emb)
 
     # Backprop the freshly-scored child up the ancestor chain.
     tree.backprop(conn, node_id, d_brief["total"])
 
-    suffix = (
-        f"  artifact={artifact_meta['bytes_path']}"
-        if artifact_meta and artifact_meta.get("bytes_path")
-        else ""
-    )
+    suffix = ""
+    if artifact_meta and artifact_meta.get("bytes_path"):
+        suffix = f"  artifact={artifact_meta['bytes_path']}"
+    elif result.artifacts:
+        suffix = f"  artifacts={len(result.artifacts)}"
+    if result.execution is not None:
+        suffix += f"  exec={result.execution.get('exit_code')}"
     console.print(
-        f"[green]  brief:[/] {path}  dopamine={d_brief['total']:.3f}{suffix}"
+        f"[green]  brief:[/] {path}  dopamine={d_brief['total']:.3f}  "
+        f"activity={activity.name}{suffix}"
     )
     return node_id, float(d_brief["total"]), brief_emb
+
+
+def _nearest_cluster_label(
+    clusters: list[dict],
+    centroids: list[np.ndarray],
+    seed_text: str,
+    embed_fn,
+) -> str:
+    """Centroid-nearest cluster label for activity-mix boosting."""
+    if not centroids or not clusters:
+        return ""
+    try:
+        seed_emb = embed_fn([seed_text])[0]
+    except Exception:
+        return ""
+    idx = taste.best_cluster_index(centroids, seed_emb) or 0
+    if idx >= len(clusters):
+        return ""
+    return clusters[idx].get("label") or ""
 
 
 def _maybe_generate(
@@ -512,7 +587,7 @@ def _maybe_generate(
     dry_run: bool,
     verbose: bool,
 ) -> Optional[dict]:
-    """Pick a generator for the cluster nearest to a brief and produce one artifact, if any."""
+    """Legacy v0.1.1 generator path (only triggered by --generate, only on research)."""
     label = ""
     if centroids and clusters:
         idx = taste.best_cluster_index(centroids, brief_emb) or 0
@@ -534,6 +609,11 @@ def _maybe_generate(
         if verbose:
             console.print(f"[yellow]  generator {gen.name}: {e}[/]")
         return None
+    return _artifact_to_dict(artifact)
+
+
+def _artifact_to_dict(artifact) -> dict:
+    """Serialize an Artifact dataclass into a JSON-safe dict for frontmatter."""
     return {
         "modality": artifact.modality,
         "prompt": artifact.prompt,

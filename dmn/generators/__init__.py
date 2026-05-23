@@ -116,7 +116,10 @@ def _register_all() -> None:
         "image_nano_banana",
         "image_replicate",
         "music_lyria",
+        "music_stable_audio",
+        "music_suno",
         "video_stub",
+        "video_replicate",
     ]:
         try:
             import_module(f"dmn.generators.{mod}")

@@ -254,6 +254,33 @@ def mutate_retool(
     return Seed(text=seed_text, source="retool", subtopic=None), forced
 
 
+def mutate_modality_switch(
+    parent_brief: dict,
+    llm,
+    rng: Optional[random.Random],
+    eligible_activities: list[str],
+) -> tuple[Seed, str]:
+    """v0.3: same seed as parent, different activity (e.g. research → code_sketch).
+
+    Returns `(seed, forced_activity)`. The wander loop runs the new activity on the same
+    seed text. If `eligible_activities` is empty / has only the parent's activity, falls
+    back to a 'drift'-style sideways question with the parent's activity preserved.
+    """
+    rng = rng or random.Random()
+    parent_activity = parent_brief.get("activity") or "research"
+    others = [a for a in eligible_activities if a and a != parent_activity]
+    if not others:
+        # Nothing to switch to — fall through to drift behavior with same activity.
+        drift_seed = mutate_drift(parent_brief, llm, rng)
+        return drift_seed, parent_activity
+    chosen = rng.choice(others)
+    seed_text = parent_brief.get("seed") or ""
+    return (
+        Seed(text=seed_text, source="modality_switch", subtopic=chosen),
+        chosen,
+    )
+
+
 # ----- Helpers ---------------------------------------------------------------
 
 
@@ -294,11 +321,13 @@ def _weighted_choice(
 
 
 def render_tree_mermaid(nodes: list[dict]) -> str:
-    """Render a Mermaid `graph TD` of a wander session's tree, color-coded by status/score.
+    """Render a Mermaid `graph TD` of a wander session's tree, color-coded by status/activity.
 
-    Nodes labelled with id + truncated seed + dopamine. Click handlers point to the brief
-    file path. Class definitions: high (green), mid (yellow), low (red), pruned (gray),
-    leaf (blue).
+    Nodes labelled with id + truncated seed + dopamine + activity. Click handlers point
+    to the brief file path. Class definitions: pruned (gray), leaf (blue), and one class
+    per activity (research / code_sketch / app_idea / algorithm_explore / ml_experiment /
+    image_riff / music_riff / video_riff / mood_journal). v0.3 favors activity color
+    over score buckets — score is still on each label.
     """
     if not nodes:
         return "```mermaid\ngraph TD\n  empty[\"empty tree\"]\n```\n"
@@ -309,8 +338,9 @@ def render_tree_mermaid(nodes: list[dict]) -> str:
         seed = (n.get("seed") or "").replace('"', "'").replace("\n", " ")[:40]
         score = n.get("dopamine_total") or 0.0
         status = n.get("status") or "open"
-        cls = _node_class(status, float(score))
-        label = f"#{nid} {seed}<br/>d={float(score):.2f}"
+        activity = n.get("activity") or "research"
+        cls = _node_class(status, float(score), activity)
+        label = f"#{nid} {seed}<br/>d={float(score):.2f} · {activity}"
         lines.append(f'  n{nid}["{label}"]:::{cls}')
         path = n.get("path") or ""
         if path:
@@ -321,27 +351,44 @@ def render_tree_mermaid(nodes: list[dict]) -> str:
         if pid is not None and int(pid) in node_ids:
             lines.append(f"  n{int(pid)} --> n{int(n['id'])}")
     lines += [
-        "  classDef high fill:#9be08a,color:#000",
-        "  classDef mid fill:#fff3b0,color:#000",
-        "  classDef low fill:#f4a6a6,color:#000",
         "  classDef pruned fill:#cccccc,color:#666",
         "  classDef leaf fill:#a0c4ff,color:#000",
+        "  classDef research fill:#c2e7ff,color:#000",
+        "  classDef code_sketch fill:#9be08a,color:#000",
+        "  classDef app_idea fill:#fff3b0,color:#000",
+        "  classDef algorithm_explore fill:#bee3b4,color:#000",
+        "  classDef ml_experiment fill:#ffd6a5,color:#000",
+        "  classDef image_riff fill:#fcc2d7,color:#000",
+        "  classDef music_riff fill:#dbb3ff,color:#000",
+        "  classDef video_riff fill:#a4c8ff,color:#000",
+        "  classDef mood_journal fill:#fde2c8,color:#000",
     ]
     lines.append("```")
     return "\n".join(lines) + "\n"
 
 
-def _node_class(status: str, score: float) -> str:
-    """Map (status, dopamine) to a Mermaid classDef name."""
+def _node_class(status: str, score: float, activity: str = "research") -> str:
+    """Map (status, dopamine, activity) to a Mermaid classDef name.
+
+    Status takes precedence (pruned/leaf are visually distinct), then activity name.
+    """
     if status == "pruned":
         return "pruned"
     if status == "leaf":
         return "leaf"
-    if score >= 0.5:
-        return "high"
-    if score >= 0.3:
-        return "mid"
-    return "low"
+    # Restrict to known activity names so unknown values can't break the Mermaid markup.
+    known = {
+        "research",
+        "code_sketch",
+        "app_idea",
+        "algorithm_explore",
+        "ml_experiment",
+        "image_riff",
+        "music_riff",
+        "video_riff",
+        "mood_journal",
+    }
+    return activity if activity in known else "research"
 
 
 def render_entity_cooccurrence_mermaid(nodes: list[dict], top_n: int = 30) -> str:
