@@ -668,22 +668,28 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
     return fm, parts[2].lstrip("\n")
 
 
+def _fix_artifact_path(src: str, html_path: Path) -> str:
+    """Return href/src suitable for an HTML file in journal/."""
+    if src.startswith(("http://", "https://", "data:", "../")):
+        return src
+    return artifact_href(html_path, src)
+
+
 def _md_to_html(body: str, brief_path: Path) -> str:
     """Convert markdown body to HTML, fixing artifact relative paths."""
     text = body.strip()
-    # Rewrite markdown image/audio paths to be correct from the HTML file location.
     html_path = brief_path.with_suffix(".html")
 
     def _fix_img(m: re.Match) -> str:
         alt, src = m.group(1), m.group(2)
-        fixed = artifact_href(html_path, src)
+        fixed = _fix_artifact_path(src, html_path)
         return f"![{alt}]({fixed})"
 
     text = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", _fix_img, text)
 
     def _fix_audio(m: re.Match) -> str:
         src = m.group(1)
-        fixed = artifact_href(html_path, src)
+        fixed = _fix_artifact_path(src, html_path)
         return f'<audio controls src="{fixed}"></audio>'
 
     text = re.sub(
@@ -692,12 +698,12 @@ def _md_to_html(body: str, brief_path: Path) -> str:
         text,
     )
     rendered = _md.render(text)
-    # Fix hrefs in rendered HTML for artifacts linked in markdown.
+
     def _fix_href(m: re.Match) -> str:
         prefix, url, suffix = m.group(1), m.group(2), m.group(3)
-        if url.startswith(("http://", "https://", "#", "data:")):
+        if url.startswith(("http://", "https://", "#", "data:", "../")):
             return m.group(0)
-        fixed = artifact_href(html_path, url)
+        fixed = _fix_artifact_path(url, html_path)
         return f'{prefix}{html.escape(fixed)}{suffix}'
 
     rendered = re.sub(r'(href=")([^"]+)(")', _fix_href, rendered)
