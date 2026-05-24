@@ -34,7 +34,7 @@ from dmn import __version__
 from dmn import activities as acts
 from dmn import embeddings as emb
 from dmn import generators as gens
-from dmn import journal, seeds, store, taste, tree
+from dmn import html_journal, journal, seeds, store, taste, tree
 from dmn.activities import ActivityContext, ActivityResult
 from dmn.llm import get_llm
 from dmn.loop import available_tools_for
@@ -405,6 +405,7 @@ def main(
     entries = store.list_journal(conn, limit=500)
     journal.write_index(entries)
     journal.write_today_notebook(entries)
+    html_journal.build_html_journal(entries, session_nodes=session_nodes)
 
     pruned_count = sum(1 for n in session_nodes if n.get("status") == "pruned")
     leaf_count = sum(1 for n in session_nodes if n.get("status") == "leaf")
@@ -412,7 +413,7 @@ def main(
     console.print(
         f"\n[bold]Wander complete.[/] {n_done} brief(s) "
         f"({pruned_count} pruned, {leaf_count} leaf, {open_count} open). "
-        f"Tree → [dim]journal/tree.md[/]"
+        f"Tree → [dim]journal/tree.html[/]"
     )
 
 

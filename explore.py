@@ -34,7 +34,7 @@ from dmn import __version__
 from dmn import activities as acts
 from dmn import embeddings as emb
 from dmn import generators as gens
-from dmn import journal, seeds, store, taste
+from dmn import html_journal, journal, seeds, store, taste
 from dmn.activities import ActivityContext, ActivityResult
 from dmn.llm import get_llm
 
@@ -276,6 +276,7 @@ def main(
     entries = store.list_journal(conn, limit=200)
     journal.write_index(entries)
     journal.write_today_notebook(entries)
+    html_journal.build_html_journal(entries)
 
     session_entries = entries[:n_done]
     top = sorted(
@@ -292,7 +293,7 @@ def main(
             f"  - {e['dopamine_total']:.3f}  [{e['seed_source']}/{e.get('activity') or 'research'}] "
             f"{e['seed']} -> {e['path']}"
         )
-    console.print(f"\nMorning rollup: [dim]journal/today.md[/]")
+    console.print(f"\nMorning rollup: [dim]journal/today.html[/]")
 
 
 def _pick_seed(

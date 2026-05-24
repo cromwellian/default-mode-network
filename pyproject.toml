@@ -50,6 +50,7 @@ include = [
     "prepare.py",
     "explore.py",
     "wander.py",
+    "journal.py",
     "profile.py",
     "program.md",
     "SKILL.md",

@@ -244,6 +244,14 @@ The export format (`profile.dmn.json`, schema v1) carries a per-model fingerprin
 can't accidentally import a profile built from a different embedding model — that would
 silently corrupt distances. Re-embedding-on-import is also a v0.2 item.
 
+## Reading the journal
+
+Each wander writes markdown briefs under `journal/` (for git/agent compatibility) and
+regenerates HTML views for browsing: `index.html` (all briefs by dopamine),
+`today.html` (last 24h rollup), `tree.html` (wander session tree), plus one
+`{slug}.html` per brief. Open `journal/index.html` in a browser, or rebuild anytime
+with `uv run journal.py build`.
+
 ## Privacy
 
 All profile data — your interview answers, browser history, embeddings, journal — lives **locally** in `data/` and `journal/`, both gitignored. None of it is uploaded anywhere.
@@ -270,6 +278,7 @@ dmn/                  — plumbing
   llm.py              — anthropic / openai / ollama / lmstudio / stub providers
   store.py            — SQLite schema + helpers (v5 adds journal activity / artifacts / execution)
   journal.py          — markdown brief writer + index + today's notebook + tree.md (v0.2/v0.3)
+  html_journal.py     — HTML journal views (index/today/tree + per-brief pages)
   portability.py      — schema-v5 profile.dmn.json serialization
   activities/         — pluggable wander activities (research/code/app/algorithm/ml/image/music/video/mood) (v0.3)
   tools/              — pluggable search backends (arxiv, wikipedia, ddg, hn, reddit, ...)
