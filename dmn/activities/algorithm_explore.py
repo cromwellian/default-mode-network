@@ -163,7 +163,7 @@ class AlgorithmExploreActivity:
 
     def _gen(self, seed: Seed, ctx: ActivityContext) -> tuple[str, dict, str]:
         try:
-            max_tokens = 3500 if ctx.code_budget == "medium" else 5000 if ctx.code_budget == "large" else 2000
+            max_tokens = 8000 if ctx.code_budget == "medium" else 12000 if ctx.code_budget == "large" else 3000
             budget_note = {
                 "medium": "up to about 250 lines",
                 "large": "up to about 350 lines",
@@ -176,7 +176,7 @@ class AlgorithmExploreActivity:
             text = (resp.text or "").strip()
         except Exception:
             text = ""
-        code = extract_fenced(text, "python")
+        code = extract_fenced(text, "python", salvage=True)
         meta = extract_json_meta(text)
         commentary = ""
         if code:

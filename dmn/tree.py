@@ -43,6 +43,7 @@ class Frontier:
         # heap entries: (-score, monotonic_counter, node_id, payload)
         self._heap: list[tuple[float, int, int, dict]] = []
         self._best_score: dict[int, float] = {}
+        self._payload: dict[int, dict] = {}
         self._counter: int = 0
 
     def push(
@@ -51,18 +52,41 @@ class Frontier:
         """Insert or rescore a node in the frontier."""
         self._counter += 1
         self._best_score[node_id] = float(score)
+        self._payload[int(node_id)] = payload or {}
         heapq.heappush(
             self._heap, (-float(score), self._counter, int(node_id), payload or {})
         )
 
-    def pop_best(self) -> Optional[dict]:
-        """Pop the highest-scoring non-stale node, or None if the frontier is empty."""
+    def pop_best(
+        self, *, total_iters: int = 0, explore_c: float = 0.0
+    ) -> Optional[dict]:
+        """Pop the best node, or None if the frontier is empty.
+
+        With `explore_c <= 0` (default) this is pure best-first: the highest-scoring open
+        node wins. With `explore_c > 0` it adds a UCB1 exploration bonus so the loop
+        doesn't tunnel down one greedy branch — shallower / less-committed nodes get a
+        premium that decays with depth, restoring the breadth a "wandering mind" wants.
+        `total_iters` is the global expansion count (the UCB N term).
+        """
+        if explore_c and explore_c > 0.0 and self._best_score:
+            def priority(nid: int) -> float:
+                depth = int(self._payload.get(nid, {}).get("depth", 0))
+                # Treat depth as the visit count: a node deep in an exploited branch has
+                # effectively been "visited" more, so its exploration bonus shrinks.
+                bonus = ucb_bonus({"visit_count": depth + 1}, total_iters, C=explore_c)
+                return self._best_score[nid] + bonus
+
+            nid = max(self._best_score, key=priority)
+            score = self._best_score.pop(nid)
+            payload = self._payload.pop(nid, {})
+            return {"id": nid, "score": score, **payload}
         while self._heap:
             neg, _, nid, payload = heapq.heappop(self._heap)
             score = -neg
             current = self._best_score.get(nid)
             if current is not None and abs(current - score) < 1e-9:
                 self._best_score.pop(nid, None)
+                self._payload.pop(nid, None)
                 return {"id": nid, "score": score, **payload}
         return None
 
@@ -88,6 +112,7 @@ class Frontier:
     def discard(self, node_id: int) -> None:
         """Remove a node from the live frontier; stale heap entries are skipped later."""
         self._best_score.pop(int(node_id), None)
+        self._payload.pop(int(node_id), None)
 
 
 # ----- Pruner -----------------------------------------------------------------
@@ -110,9 +135,9 @@ class Pruner:
 def ucb_bonus(node: dict, total_iters: int, C: float = 0.4) -> float:
     """Standard UCB1 exploration bonus: C * sqrt(ln(N_total) / max(1, N_node)).
 
-    `node['visit_count']` is the visit count for this node (defaults to 1). v0.2's wander
-    loop pops each node at most once, so the bonus is effectively a per-iteration constant —
-    but the API is in place for v0.3 re-expansion.
+    `node['visit_count']` is the visit count for this node (defaults to 1). `Frontier.pop_best`
+    feeds it `depth + 1` so the bonus decays with how deep (i.e. how committed) a branch is;
+    pass `--explore 0` to wander.py to disable and get pure best-first selection.
     """
     n_visits = max(1, int(node.get("visit_count", 1)))
     return C * math.sqrt(math.log(max(2, int(total_iters))) / n_visits)

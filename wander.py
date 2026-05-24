@@ -166,6 +166,11 @@ def main(
         "--min-improvement",
         help="Minimum best-score delta that resets --patience.",
     ),
+    explore: float = typer.Option(
+        0.05,
+        "--explore",
+        help="UCB exploration weight for frontier selection (0 = pure best-first/greedy).",
+    ),
     code_budget: str = typer.Option(
         "small",
         "--code-budget",
@@ -418,7 +423,7 @@ def main(
                 )
             continue
 
-        node_summary = frontier.pop_best()
+        node_summary = frontier.pop_best(total_iters=max(2, n_done), explore_c=explore)
         if node_summary is None:
             continue
         parent_id = int(node_summary["id"])

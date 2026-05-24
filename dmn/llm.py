@@ -79,14 +79,24 @@ class AnthropicLLM:
             or "claude-sonnet-4-5-20250929"
         )
 
+    # Above this many output tokens the SDK refuses a non-streaming call ("Streaming is
+    # required for operations that may take longer than 10 minutes"), so large code/HTML
+    # activities must stream. Small calls (synthesis, seed brainstorming) stay non-streaming.
+    _STREAM_THRESHOLD = 4096
+
     def complete(self, system: str, user: str, max_tokens: int = 1024) -> LLMResponse:
         """Send a single-turn message to Claude and return the text body."""
-        msg = self.client.messages.create(
+        kwargs = dict(
             model=self.model,
             max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": user}],
         )
+        if max_tokens > self._STREAM_THRESHOLD:
+            with self.client.messages.stream(**kwargs) as stream:
+                msg = stream.get_final_message()
+        else:
+            msg = self.client.messages.create(**kwargs)
         text = "".join(getattr(b, "text", "") for b in msg.content)
         return LLMResponse(text=text, model=self.model)
 

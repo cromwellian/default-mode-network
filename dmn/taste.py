@@ -13,7 +13,11 @@ ALPHA = 0.50  # alignment with taste clusters
 BETA = 0.22   # novelty (1 - max sim to recent findings)
 GAMMA = 0.13  # surprise (taste-aligned but new angle)
 DELTA = 0.20  # fulfillment — did research/tools return useful material?
-EPS = 0.05    # serendipity epsilon-greedy probability + bonus weight
+# Serendipity used to overload a single EPS constant as *both* the firing probability and
+# the score weight, which capped its contribution at 0.05 — too small to widen horizons.
+# These are now independent knobs: how often it fires vs. how much it's worth when it does.
+EPS = 0.05               # P(serendipity fires) when the low-align/high-novelty gate is met
+SERENDIPITY_BONUS = 0.10  # weight added to `total` when serendipity fires
 
 # Serendipity bonus only applies when fulfillment meets this floor.
 SERENDIPITY_MIN_FULFILLMENT = 0.35
@@ -441,7 +445,7 @@ def dopamine(
         and n > 0.6
     ):
         serendipity = 1.0
-    total = ALPHA * a + BETA * n + GAMMA * s + DELTA * f + EPS * serendipity
+    total = ALPHA * a + BETA * n + GAMMA * s + DELTA * f + SERENDIPITY_BONUS * serendipity
     return {
         "alignment": round(float(a), 4),
         "novelty": round(float(n), 4),

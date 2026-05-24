@@ -351,8 +351,9 @@ pyproject.toml
 
 ## Knobs you'll want to turn
 
-- `dmn/taste.py` — the dopamine constants (`ALPHA`, `BETA`, `GAMMA`, `DELTA`, `EPS`, `SERENDIPITY_MIN_FULFILLMENT`). Crank `EPS` up to widen your horizons; crank it down to drill in. Raise `DELTA` to reward briefs backed by solid tool hits.
-- `dmn/seeds.py` — the mix of seed strategies. The default `explore.py` samples them with fixed probabilities; tune those.
+- `dmn/taste.py` — the dopamine constants (`ALPHA`, `BETA`, `GAMMA`, `DELTA`, `EPS`, `SERENDIPITY_BONUS`, `SERENDIPITY_MIN_FULFILLMENT`). Serendipity now has two independent knobs: `EPS` is *how often* it fires (probability) and `SERENDIPITY_BONUS` is *how much it's worth* when it does. Crank either up to widen your horizons; crank down to drill in. Raise `DELTA` to reward briefs backed by solid tool hits.
+- `dmn/seeds.py` — the mix of seed strategies. The default `explore.py` samples them with fixed probabilities; tune those. Each `Seed` now carries a `query` (clean keywords handed to the search APIs) distinct from its `text` (the conversational question the LLM synthesizes against) — `search_query()` derives one from the other when a generator doesn't set it.
+- `wander.py --explore` — UCB exploration weight for tree-mode frontier selection. `0` is pure best-first (greedy); higher values give shallower/less-committed branches an exploration premium so the wander doesn't tunnel down one thread.
 - `explore.py` — *everything*. This is your editable file. Try a different planner, a different scorer, a different synthesis prompt. Log a one-line rationale at the top of the file every time you change it.
 - `DMN_LLM_PROVIDER` env var: `anthropic` (default if `ANTHROPIC_API_KEY` set), `openai`, or `stub`.
 - `DMN_EMBEDDINGS` env var: `st` (default, sentence-transformers) or `openai`.

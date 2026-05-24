@@ -127,7 +127,7 @@ class CodeSketchActivity:
     ) -> tuple[str, dict, str]:
         """Ask the LLM for code + JSON meta + commentary; fall back to a canned sketch."""
         try:
-            max_tokens = 3500 if ctx.code_budget == "medium" else 5000 if ctx.code_budget == "large" else 2000
+            max_tokens = 8000 if ctx.code_budget == "medium" else 12000 if ctx.code_budget == "large" else 3000
             budget_note = {
                 "medium": "up to about 250 lines",
                 "large": "up to about 350 lines, with simple multi-function structure",
@@ -140,7 +140,7 @@ class CodeSketchActivity:
             text = (resp.text or "").strip()
         except Exception:
             text = ""
-        code = extract_fenced(text, "python")
+        code = extract_fenced(text, "python", salvage=True)
         meta = extract_json_meta(text)
         # Commentary = anything after the last fenced block.
         commentary = ""

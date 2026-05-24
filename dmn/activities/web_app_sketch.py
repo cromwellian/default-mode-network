@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import json
+from typing import Optional
 
 from dmn.activities import ActivityContext, ActivityResult, register
-from dmn.activities._helpers import extract_fenced, extract_json_meta, slugify, write_artifact_dir
+from dmn.activities._helpers import extract_html, extract_json_meta, slugify, write_artifact_dir
 from dmn.generators import Artifact
 from dmn.seeds import Seed
 
@@ -88,9 +89,22 @@ class WebAppSketchActivity:
         return True
 
     def run(self, seed: Seed, ctx: ActivityContext) -> ActivityResult:
+        html_text, meta = self._gen(seed, ctx)
+        if html_text is None:
+            # Generation/parse failed (e.g. truncated output). Don't write a misleading
+            # canned "Signal Mixer" — return a skipped result like the research activity.
+            return ActivityResult(
+                title=f"Web app (skipped): {seed.text[:60]}",
+                body_md="",
+                embedding_text=seed.text,
+                metadata={
+                    "skipped": True,
+                    "reason": "generation_failed",
+                    "activity": self.name,
+                },
+            )
         slug = slugify(seed.text, n=50)
         out_dir = write_artifact_dir(ctx.artifact_root, self.name, slug)
-        html_text, meta = self._gen(seed, ctx)
         index_path = out_dir / "index.html"
         manifest_path = out_dir / "manifest.json"
         index_path.write_text(html_text.rstrip() + "\n", encoding="utf-8")
@@ -127,23 +141,32 @@ class WebAppSketchActivity:
             },
         )
 
-    def _gen(self, seed: Seed, ctx: ActivityContext) -> tuple[str, dict]:
+    def _gen(self, seed: Seed, ctx: ActivityContext) -> tuple[Optional[str], dict]:
         if ctx.dry_run:
             return _DRYRUN_HTML, {
                 "title": "Dry-run Signal Mixer",
                 "summary": "A tiny inline simulation for validating artifact plumbing.",
                 "interaction": "Range sliders redraw a blended waveform.",
             }
+        # A complete inline HTML app is large; 4500 tokens routinely truncated it before
+        # the closing fence, which is why every sketch degraded to the dry-run stub.
+        max_tokens = (
+            24000 if ctx.code_budget == "large"
+            else 16000 if ctx.code_budget == "medium"
+            else 8000
+        )
         try:
             resp = ctx.llm.complete(
                 system=SYSTEM,
                 user=USER_TEMPLATE.format(seed_text=seed.text),
-                max_tokens=4500 if ctx.code_budget in {"medium", "large"} else 3000,
+                max_tokens=max_tokens,
             )
             text = (resp.text or "").strip()
         except Exception:
             text = ""
-        html_text = extract_fenced(text, "html") or _DRYRUN_HTML
+        html_text = extract_html(text)
+        if not html_text:
+            return None, {}
         meta = extract_json_meta(text) or {
             "title": "Web app sketch",
             "summary": "Self-contained HTML app generated from the seed.",
