@@ -149,7 +149,8 @@ def main(dry_run: bool = False, browser_limit: int | None = None) -> None:
         f"\nClustering [bold]{len(interests)}[/] total interests "
         "(visit-count-weighted KMeans)…"
     )
-    centroids, labels = taste.cluster(full_vectors, sample_weight=full_weights)
+    cr = taste.cluster(full_vectors, sample_weight=full_weights, method="kmeans")
+    centroids, labels = cr.centroids, cr.labels
 
     # 5) Re-label.
     llm = get_llm(dry_run=dry_run)

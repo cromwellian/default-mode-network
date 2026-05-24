@@ -23,6 +23,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Iterable, Optional
@@ -135,6 +136,21 @@ _TITLE_URL_RE = re.compile(r"^(.*) \((https?://[^)]+)\)$")
 _PER_HOST_KEEP = 5
 
 
+def _webkit_to_unix(webkit_us: int) -> float:
+    """Convert WebKit/Chromium timestamp (µs since 1601-01-01) to unix seconds."""
+    return (float(webkit_us) / 1_000_000.0) - 11644473600.0
+
+
+def _safari_to_unix(safari_ts: float) -> float:
+    """Convert Safari Core Data timestamp (seconds since 2001-01-01) to unix."""
+    return float(safari_ts) + 978307200.0
+
+
+def _firefox_to_unix(micros: int) -> float:
+    """Convert Firefox last_visit_date (µs since unix epoch) to unix seconds."""
+    return float(micros) / 1_000_000.0
+
+
 def _firefox_path() -> Optional[Path]:
     """Locate the most recent Firefox profile's places.sqlite, if any."""
     base = HOME / "Library/Application Support/Firefox/Profiles"
@@ -212,13 +228,16 @@ def _normalize_row(row: dict) -> dict:
     url = _clean_url(row.get("url") or "")
     visit_count = max(0, int(row.get("visit_count") or 0))
     weight = float(math.log1p(visit_count)) if visit_count > 0 else 1.0
-    return {
+    out = {
         "title": title,
         "url": url,
         "browser": row.get("browser"),
         "visit_count": visit_count,
         "weight": weight,
     }
+    if row.get("last_seen") is not None:
+        out["last_seen"] = float(row["last_seen"])
+    return out
 
 
 def import_history(
@@ -314,12 +333,12 @@ def _read_raw(path: Path, browser: str, limit: Optional[int]) -> list[dict]:
             )
         elif browser == "firefox":
             base_q = (
-                "SELECT title, url, visit_count "
+                "SELECT title, url, visit_count, last_visit_date "
                 "FROM moz_places ORDER BY last_visit_date DESC"
             )
         else:  # chrome, arc, brave, edge — all use Chromium's `urls` table
             base_q = (
-                "SELECT title, url, visit_count "
+                "SELECT title, url, visit_count, last_visit_time "
                 "FROM urls ORDER BY last_visit_time DESC"
             )
         if limit is None:
@@ -337,14 +356,24 @@ def _read_raw(path: Path, browser: str, limit: Optional[int]) -> list[dict]:
         title = (row[0] or "").strip()
         url = (row[1] or "").strip()
         visit_count = int(row[2] or 0) if len(row) > 2 else 0
-        out.append(
-            {
-                "title": title,
-                "url": url,
-                "browser": browser,
-                "visit_count": visit_count,
-            }
-        )
+        last_seen: float | None = None
+        if len(row) > 3 and row[3] is not None:
+            raw_ts = row[3]
+            if browser == "safari":
+                last_seen = _safari_to_unix(float(raw_ts))
+            elif browser == "firefox":
+                last_seen = _firefox_to_unix(int(raw_ts))
+            else:
+                last_seen = _webkit_to_unix(int(raw_ts))
+        entry = {
+            "title": title,
+            "url": url,
+            "browser": browser,
+            "visit_count": visit_count,
+        }
+        if last_seen is not None:
+            entry["last_seen"] = last_seen
+        out.append(entry)
     return out
 
 
@@ -370,12 +399,17 @@ def _to_text_dicts(rows: list[dict]) -> list[dict]:
         if key in by_key:
             entry = by_key[key]
             entry["_visits"] = int(entry.get("_visits", 0)) + visits
+            ls = r.get("last_seen")
+            if ls is not None:
+                entry["_last_seen"] = max(float(entry.get("_last_seen") or 0), float(ls))
         else:
             entry = {
                 "text": text_clipped,
                 "source": source,
                 "_visits": max(visits, 0),
             }
+            if r.get("last_seen") is not None:
+                entry["_last_seen"] = float(r["last_seen"])
             by_key[key] = entry
             order.append(key)
     out: list[dict] = []
@@ -383,6 +417,9 @@ def _to_text_dicts(rows: list[dict]) -> list[dict]:
         entry = by_key[key]
         v = int(entry.pop("_visits", 0))
         entry["weight"] = float(math.log1p(v)) if v > 0 else 1.0
+        entry["visit_count"] = v
+        if "_last_seen" in entry:
+            entry["last_seen"] = entry.pop("_last_seen")
         out.append(entry)
     return out
 

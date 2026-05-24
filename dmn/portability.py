@@ -22,8 +22,8 @@ import numpy as np
 
 from dmn import __version__, store
 
-SCHEMA_VERSION = 5
-_SUPPORTED_SCHEMAS = {1, 2, 3, 4, 5}
+SCHEMA_VERSION = 6
+_SUPPORTED_SCHEMAS = {1, 2, 3, 4, 5, 6}
 
 
 def _embedding_model_name() -> str:
@@ -83,6 +83,9 @@ def serialize_profile(
                 "size": int(c.get("n_members") or 0),
                 "weight": 1.0,
                 "meta": c.get("meta") or None,
+                "medoid_interest_id": c.get("medoid_interest_id"),
+                "cluster_method": c.get("cluster_method"),
+                "is_noise": bool(c.get("is_noise")),
             }
             for c in clusters
         ],

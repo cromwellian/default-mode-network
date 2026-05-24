@@ -1,7 +1,9 @@
 """Taste profile clustering + the dopamine reward function. Tune the constants below freely."""
 from __future__ import annotations
 
+import math
 import random
+from dataclasses import dataclass
 from typing import Optional, Sequence
 
 import numpy as np
@@ -16,6 +18,18 @@ MIN_CLUSTERS = 4
 DEFAULT_K = 8
 
 
+@dataclass
+class ClusterResult:
+    """Output of `cluster()` — centroids are medoid embeddings for HDBSCAN."""
+
+    centroids: np.ndarray
+    labels: np.ndarray
+    medoid_indices: list[int]
+    method: str
+    n_noise: int
+    silhouette: float | None
+
+
 def _norm(v: np.ndarray) -> np.ndarray:
     """L2-normalize a vector, returning the original if its norm is zero."""
     n = float(np.linalg.norm(v))
@@ -25,6 +39,31 @@ def _norm(v: np.ndarray) -> np.ndarray:
 def _cos(a: np.ndarray, b: np.ndarray) -> float:
     """Cosine similarity between two 1-D vectors."""
     return float(np.dot(_norm(a), _norm(b)))
+
+
+def recency_decay(days_since: float, half_life_days: float = 90.0) -> float:
+    """Exponential recency weight: 0.5 ** (days_since / half_life_days)."""
+    return 0.5 ** (float(days_since) / float(half_life_days))
+
+
+def composite_weight(
+    visit_count: float,
+    days_since: float,
+    source: str,
+    half_life_days: float = 90.0,
+) -> float:
+    """Composite sample weight: log1p(visit_count) × recency factor.
+
+    Manual / interview sources are treated as maximally recent; journal_import gets 0.95.
+    """
+    base = math.log1p(max(0.0, float(visit_count)))
+    if source.startswith("manual") or source == "interview":
+        recency = 1.0
+    elif source == "journal_import":
+        recency = 0.95
+    else:
+        recency = recency_decay(days_since, half_life_days)
+    return base * recency
 
 
 def alignment(item_emb: np.ndarray, centroids: Sequence[np.ndarray]) -> float:
@@ -56,23 +95,146 @@ def surprise(
     return float(max(0.0, a - near_recent))
 
 
-def cluster(
+def _normalize_rows(x: np.ndarray) -> np.ndarray:
+    """L2-normalize each row of a 2-D array."""
+    norms = np.linalg.norm(x, axis=1, keepdims=True)
+    norms = np.where(norms > 0, norms, 1.0)
+    return x / norms
+
+
+def _weighted_medoid(
+    indices: list[int],
     embeddings: np.ndarray,
-    k: Optional[int] = None,
-    sample_weight: Optional[np.ndarray] = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """K-means cluster embeddings; returns (centroids, labels). `sample_weight` (v0.1.3) lets
-    high-visit-count interests pull centroids more strongly. Falls back to raw rows for tiny inputs.
-    """
-    if embeddings is None or len(embeddings) == 0:
-        return np.zeros((0, 0), dtype=np.float32), np.array([], dtype=int)
+    sample_weight: Optional[np.ndarray],
+) -> int:
+    """Return the index (into `embeddings`) of the weighted medoid for a member set."""
+    if len(indices) == 1:
+        return indices[0]
+    sub = embeddings[indices]
+    w = (
+        np.asarray(sample_weight, dtype=np.float64)[indices]
+        if sample_weight is not None
+        else np.ones(len(indices), dtype=np.float64)
+    )
+    w = np.maximum(w, 1e-8)
+    # Weighted sum of squared Euclidean distances on normalized vectors.
+    sub_n = _normalize_rows(sub.astype(np.float64))
+    dists = np.zeros(len(indices), dtype=np.float64)
+    for i in range(len(indices)):
+        diff = sub_n - sub_n[i]
+        dists[i] = float(np.sum(w * np.sum(diff * diff, axis=1)))
+    return indices[int(np.argmin(dists))]
+
+
+def _build_from_labels(
+    embeddings: np.ndarray,
+    labels: np.ndarray,
+    sample_weight: Optional[np.ndarray],
+    method: str,
+    include_noise_cluster: bool = False,
+) -> ClusterResult:
+    """Build centroids (medoids), medoid_indices, and silhouette from hard labels."""
+    n = len(embeddings)
+    unique = sorted(set(int(l) for l in labels if int(l) >= 0))
+    medoid_indices: list[int] = []
+    centroids: list[np.ndarray] = []
+    out_labels = labels.copy()
+
+    for lab in unique:
+        members = [i for i in range(n) if int(labels[i]) == lab]
+        midx = _weighted_medoid(members, embeddings, sample_weight)
+        medoid_indices.append(midx)
+        centroids.append(embeddings[midx].astype(np.float32).copy())
+
+    n_noise = int(np.sum(labels == -1))
+
+    if include_noise_cluster and n_noise > 0:
+        noise_members = [i for i in range(n) if int(labels[i]) == -1]
+        midx = _weighted_medoid(noise_members, embeddings, sample_weight)
+        medoid_indices.append(midx)
+        centroids.append(embeddings[midx].astype(np.float32).copy())
+        noise_cluster_id = max(unique) + 1 if unique else 0
+        for i in noise_members:
+            out_labels[i] = noise_cluster_id
+
+    silhouette = _silhouette(embeddings, labels)
+
+    return ClusterResult(
+        centroids=np.stack(centroids).astype(np.float32) if centroids else np.zeros((0, embeddings.shape[1]), dtype=np.float32),
+        labels=out_labels,
+        medoid_indices=medoid_indices,
+        method=method,
+        n_noise=n_noise,
+        silhouette=silhouette,
+    )
+
+
+def _silhouette(embeddings: np.ndarray, labels: np.ndarray) -> float | None:
+    """Compute silhouette on non-noise points when >= 2 clusters exist."""
+    mask = labels >= 0
+    if int(mask.sum()) < 2:
+        return None
+    sub_labels = labels[mask]
+    n_clusters = len(set(int(l) for l in sub_labels))
+    if n_clusters < 2:
+        return None
+    try:
+        from sklearn.metrics import silhouette_score  # type: ignore
+
+        sub_emb = _normalize_rows(embeddings[mask].astype(np.float64))
+        return float(silhouette_score(sub_emb, sub_labels, metric="euclidean"))
+    except Exception:
+        return None
+
+
+def _cluster_hdbscan(
+    embeddings: np.ndarray,
+    sample_weight: Optional[np.ndarray],
+    min_cluster_size: Optional[int] = None,
+) -> ClusterResult:
+    """HDBSCAN on L2-normalized embeddings with sqrt(weight) row scaling."""
+    try:
+        import hdbscan  # type: ignore
+    except ImportError:
+        return _cluster_kmeans(embeddings, k=None, sample_weight=sample_weight)
+
+    n = len(embeddings)
+    mcs = min_cluster_size if min_cluster_size is not None else max(15, n // 80)
+    normed = _normalize_rows(embeddings.astype(np.float64))
+    if sample_weight is not None:
+        sw = np.asarray(sample_weight, dtype=np.float64).ravel()
+        if sw.shape[0] == n:
+            # sqrt(weight) row scaling approximates sample_weight in distance (documented trick).
+            scale = np.sqrt(np.maximum(sw, 1e-8))[:, None]
+            normed = normed * scale
+
+    clusterer = hdbscan.HDBSCAN(
+        min_cluster_size=mcs,
+        min_samples=5,
+        metric="euclidean",
+    )
+    raw_labels = clusterer.fit_predict(normed)
+    return _build_from_labels(
+        embeddings, raw_labels.astype(int), sample_weight, "hdbscan"
+    )
+
+
+def _cluster_kmeans(
+    embeddings: np.ndarray,
+    k: Optional[int],
+    sample_weight: Optional[np.ndarray],
+) -> ClusterResult:
+    """K-means fallback; centroids are cluster centers (nearest-point medoid used)."""
     n = len(embeddings)
     if n < MIN_CLUSTERS:
-        return embeddings.astype(np.float32).copy(), np.arange(n)
+        labels = np.arange(n)
+        return _build_from_labels(embeddings, labels, sample_weight, "kmeans")
     try:
         from sklearn.cluster import KMeans  # type: ignore
     except Exception:
-        return embeddings.astype(np.float32).copy(), np.arange(n)
+        labels = np.arange(n)
+        return _build_from_labels(embeddings, labels, sample_weight, "kmeans")
+
     k = k or min(DEFAULT_K, n)
     km = KMeans(n_clusters=k, n_init="auto", random_state=42)
     if sample_weight is not None:
@@ -83,7 +245,172 @@ def cluster(
             labels = km.fit_predict(embeddings)
     else:
         labels = km.fit_predict(embeddings)
-    return km.cluster_centers_.astype(np.float32), labels
+
+    # Replace K-means centroids with medoids for consistency.
+    return _build_from_labels(embeddings, labels.astype(int), sample_weight, "kmeans")
+
+
+def _cluster_gmm(
+    embeddings: np.ndarray,
+    sample_weight: Optional[np.ndarray],
+) -> ClusterResult:
+    """Gaussian mixture with BIC k-selection (k = 2 .. min(20, n//10))."""
+    n = len(embeddings)
+    if n < MIN_CLUSTERS:
+        labels = np.arange(n)
+        return _build_from_labels(embeddings, labels, sample_weight, "gmm")
+    try:
+        from sklearn.mixture import GaussianMixture  # type: ignore
+    except Exception:
+        return _cluster_kmeans(embeddings, k=None, sample_weight=sample_weight)
+
+    max_k = min(20, max(2, n // 10))
+    best_k, best_bic, best_labels = 2, float("inf"), None
+    sw = None
+    if sample_weight is not None:
+        sw_arr = np.asarray(sample_weight, dtype=np.float64).ravel()
+        if sw_arr.shape[0] == n and np.any(sw_arr > 0):
+            sw = sw_arr
+
+    for k in range(2, max_k + 1):
+        gmm = GaussianMixture(n_components=k, n_init=2, random_state=42)
+        if sw is not None:
+            gmm.fit(embeddings, sample_weight=sw)
+        else:
+            gmm.fit(embeddings)
+        bic = gmm.bic(embeddings)
+        if bic < best_bic:
+            best_bic = bic
+            best_k = k
+            best_labels = gmm.predict(embeddings)
+
+    if best_labels is None:
+        return _cluster_kmeans(embeddings, k=None, sample_weight=sample_weight)
+
+    return _build_from_labels(
+        embeddings, best_labels.astype(int), sample_weight, "gmm"
+    )
+
+
+def cluster(
+    embeddings: np.ndarray,
+    k: Optional[int] = None,
+    sample_weight: Optional[np.ndarray] = None,
+    method: str = "hdbscan",
+    recency_weights: Optional[np.ndarray] = None,
+    min_cluster_size: Optional[int] = None,
+) -> ClusterResult:
+    """Cluster embeddings; default method is HDBSCAN on L2-normalized vectors.
+
+    `recency_weights`, when provided, override `sample_weight` (composite recency × visit).
+    Falls back to K-means when HDBSCAN is unavailable or method='kmeans'.
+    """
+    if embeddings is None or len(embeddings) == 0:
+        return ClusterResult(
+            centroids=np.zeros((0, 0), dtype=np.float32),
+            labels=np.array([], dtype=int),
+            medoid_indices=[],
+            method=method,
+            n_noise=0,
+            silhouette=None,
+        )
+
+    sw = recency_weights if recency_weights is not None else sample_weight
+    m = (method or "hdbscan").lower()
+    if m == "kmeans":
+        return _cluster_kmeans(embeddings, k=k, sample_weight=sw)
+    if m == "gmm":
+        return _cluster_gmm(embeddings, sample_weight=sw)
+    return _cluster_hdbscan(embeddings, sample_weight=sw, min_cluster_size=min_cluster_size)
+
+
+def pin_manual_interests(
+    result: ClusterResult,
+    embeddings: np.ndarray,
+    sources: Sequence[str],
+    sample_weight: Optional[np.ndarray],
+    *,
+    mega_fraction: float = 0.40,
+    group_cosine: float = 0.92,
+    weight_boost: float = 3.0,
+) -> tuple[ClusterResult, np.ndarray]:
+    """Promote manual/interview interests from noise or mega-clusters to pinned mini-clusters.
+
+    Returns updated ClusterResult and boosted sample_weight array.
+    """
+    labels = result.labels.copy()
+    n = len(labels)
+    sw = (
+        np.asarray(sample_weight, dtype=np.float64).copy()
+        if sample_weight is not None
+        else np.ones(n, dtype=np.float64)
+    )
+
+    mega_label: int | None = None
+    for lab in set(int(l) for l in labels if int(l) >= 0):
+        count = int(np.sum(labels == lab))
+        if count > mega_fraction * n:
+            mega_label = lab
+            break
+
+    manual_idxs = [
+        i
+        for i, src in enumerate(sources)
+        if src.startswith("manual") or src == "interview"
+    ]
+    pin_candidates = [
+        i
+        for i in manual_idxs
+        if int(labels[i]) == -1
+        or (mega_label is not None and int(labels[i]) == mega_label)
+    ]
+    if not pin_candidates:
+        return result, sw
+
+    # Group similar manual interests (cosine > group_cosine).
+    groups: list[list[int]] = []
+    used: set[int] = set()
+    emb_n = _normalize_rows(embeddings.astype(np.float64))
+    for i in pin_candidates:
+        if i in used:
+            continue
+        group = [i]
+        used.add(i)
+        for j in pin_candidates:
+            if j in used:
+                continue
+            if float(np.dot(emb_n[i], emb_n[j])) >= group_cosine:
+                group.append(j)
+                used.add(j)
+        groups.append(group)
+
+    next_label = int(labels.max()) + 1 if int(labels.max()) >= 0 else 0
+    for group in groups:
+        for idx in group:
+            labels[idx] = next_label
+            sw[idx] *= weight_boost
+        next_label += 1
+
+    rebuilt = _build_from_labels(embeddings, labels, sw, result.method)
+    rebuilt.silhouette = result.silhouette
+    return rebuilt, sw
+
+
+def add_noise_cluster(
+    result: ClusterResult,
+    embeddings: np.ndarray,
+    sample_weight: Optional[np.ndarray],
+) -> ClusterResult:
+    """Append an explicit noise-bucket cluster (is_noise) for unclustered points."""
+    if result.n_noise <= 0:
+        return result
+    return _build_from_labels(
+        embeddings,
+        result.labels,
+        sample_weight,
+        result.method,
+        include_noise_cluster=True,
+    )
 
 
 def dopamine(

@@ -174,7 +174,8 @@ def main(
         f"\nClustering [bold]{len(interests)}[/] total interests "
         "(visit-count-weighted KMeans)…"
     )
-    centroids, labels = taste.cluster(full_vectors, sample_weight=full_weights)
+    cr = taste.cluster(full_vectors, sample_weight=full_weights, method="kmeans")
+    centroids, labels = cr.centroids, cr.labels
 
     llm = get_llm(dry_run=dry_run)
     console.print(f"Synthesizing cluster labels via [bold]{llm.name}[/] LLM…")

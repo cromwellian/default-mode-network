@@ -100,7 +100,8 @@ def main(dry_run: bool = False) -> None:
         texts.append(i["text"] or "")
     vectors = np.stack(vectors_list).astype(np.float32)
 
-    centroids, labels = taste.cluster(vectors)
+    cr = taste.cluster(vectors, method="kmeans")
+    centroids, labels = cr.centroids, cr.labels
     console.print(f"Re-clustered into [bold]{len(centroids)}[/] cluster(s).")
 
     # 3) Re-label.

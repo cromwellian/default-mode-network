@@ -60,6 +60,10 @@ def _service_ratio(member_texts: list[str]) -> tuple[float, int, int]:
     return (service / total) if total else 0.0, content, service
 
 
+def _interest_by_id(interests: list[dict]) -> dict[int, dict]:
+    return {i["id"]: i for i in interests}
+
+
 def main(top: int, width: int) -> None:
     """For each cluster, print up to `top` interests closest to its centroid + service:content ratio."""
     conn = store.connect()
@@ -72,6 +76,7 @@ def main(top: int, width: int) -> None:
         console.print("[red]No interests in profile.[/]")
         return
 
+    by_id = _interest_by_id(interests)
     vectors = np.stack(
         [
             i["embedding"]
@@ -81,7 +86,6 @@ def main(top: int, width: int) -> None:
         ]
     ).astype(np.float32)
 
-    # Pre-compute, for every interest, which cluster it actually belongs to.
     valid_centroids = [c["centroid"] for c in clusters if c["centroid"] is not None]
     if not valid_centroids:
         return
@@ -92,6 +96,16 @@ def main(top: int, width: int) -> None:
         d = np.linalg.norm(cs - vectors[j], axis=1)
         own_cluster.append(cluster_ids[int(np.argmin(d))])
 
+    method = clusters[0].get("cluster_method") if clusters else None
+    sil = None
+    if clusters and clusters[0].get("meta"):
+        sil = (clusters[0]["meta"] or {}).get("silhouette")
+    if method or sil is not None:
+        console.print(
+            f"[dim]cluster_method={method or '?'}  "
+            f"silhouette={sil if sil is not None else 'n/a'}[/]"
+        )
+
     for c in sorted(clusters, key=lambda c: -int(c.get("n_members") or 0)):
         cid = c["id"]
         label = c.get("label") or f"cluster-{cid}"
@@ -99,6 +113,12 @@ def main(top: int, width: int) -> None:
         centroid = c["centroid"]
         if centroid is None:
             continue
+
+        noise_tag = " [yellow]NOISE[/]" if c.get("is_noise") else ""
+        medoid_id = c.get("medoid_interest_id")
+        medoid_text = ""
+        if medoid_id and medoid_id in by_id:
+            medoid_text = (by_id[medoid_id].get("text") or "")[:width]
 
         member_idx = [j for j in range(len(interests)) if own_cluster[j] == cid]
         member_texts = [interests[j].get("text") or "" for j in member_idx]
@@ -109,9 +129,11 @@ def main(top: int, width: int) -> None:
         top_idx = [member_idx[k] for k in order[:top]]
 
         console.print(
-            f"\n[bold cyan]cluster {cid}[/] [dim]({n} members)[/]  {label}  "
+            f"\n[bold cyan]cluster {cid}[/]{noise_tag} [dim]({n} members)[/]  {label}  "
             f"[dim]content/service = {n_content}/{n_service}  ratio={ratio:.2f}[/]"
         )
+        if medoid_text:
+            console.print(f"   medoid: {medoid_text}")
         meta = c.get("meta") or {}
         if meta.get("subtopics"):
             console.print(f"   subtopics: {meta['subtopics']}")

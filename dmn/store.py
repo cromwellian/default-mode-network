@@ -64,7 +64,7 @@ def _vec_from_json(s: Optional[str]) -> Optional[np.ndarray]:
     return np.asarray(json.loads(s), dtype=np.float32)
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -74,6 +74,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     v3: journal tree-search columns (parent_id, mutation, depth, status, subtree_score)
     v4: journal entity-tagging columns (entities, rabbit_holes — both JSON TEXT)
     v5: journal activity columns (activity, artifact_paths, execution_result)
+    v6: HDBSCAN medoids, cluster_method, is_noise, interests.last_seen
     """
     for sql in [
         # v2
@@ -92,6 +93,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "ALTER TABLE journal ADD COLUMN activity TEXT",
         "ALTER TABLE journal ADD COLUMN artifact_paths TEXT",
         "ALTER TABLE journal ADD COLUMN execution_result TEXT",
+        # v6 — HDBSCAN clustering metadata
+        "ALTER TABLE clusters ADD COLUMN medoid_interest_id INTEGER",
+        "ALTER TABLE clusters ADD COLUMN cluster_method TEXT",
+        "ALTER TABLE clusters ADD COLUMN is_noise INTEGER DEFAULT 0",
+        "ALTER TABLE interests ADD COLUMN last_seen REAL",
     ]:
         try:
             conn.execute(sql)
@@ -119,11 +125,12 @@ def add_interest(
     weight: float = 1.0,
     embedding: Optional[np.ndarray] = None,
     tags: Optional[list[str]] = None,
+    last_seen: Optional[float] = None,
 ) -> int:
     """Insert an interest row; returns the new row id."""
     cur = conn.execute(
-        "INSERT INTO interests(text, source, timestamp, weight, embedding, tags) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO interests(text, source, timestamp, weight, embedding, tags, last_seen) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (
             text,
             source,
@@ -131,6 +138,7 @@ def add_interest(
             weight,
             _vec_to_json(embedding),
             json.dumps(tags) if tags else None,
+            last_seen,
         ),
     )
     conn.commit()
@@ -140,7 +148,8 @@ def add_interest(
 def list_interests(conn: sqlite3.Connection) -> list[dict]:
     """Return all interests as a list of dicts (embedding as np.ndarray or None; tags as list)."""
     rows = conn.execute(
-        "SELECT id, text, source, timestamp, weight, embedding, tags FROM interests"
+        "SELECT id, text, source, timestamp, weight, embedding, tags, last_seen "
+        "FROM interests"
     ).fetchall()
     return [
         {
@@ -151,6 +160,7 @@ def list_interests(conn: sqlite3.Connection) -> list[dict]:
             "weight": r[4],
             "embedding": _vec_from_json(r[5]),
             "tags": json.loads(r[6]) if r[6] else [],
+            "last_seen": r[7],
         }
         for r in rows
     ]
@@ -172,6 +182,10 @@ def replace_clusters(
     centroids: np.ndarray,
     labels: list[str],
     meta_per_cluster: Optional[list[dict]] = None,
+    n_members: Optional[list[int]] = None,
+    medoid_interest_ids: Optional[list[int]] = None,
+    cluster_method: str = "hdbscan",
+    is_noise_flags: Optional[list[bool]] = None,
 ) -> None:
     """Replace the entire clusters table with the given centroids, labels, and optional meta."""
     conn.execute("DELETE FROM clusters")
@@ -181,10 +195,32 @@ def replace_clusters(
         meta_json = None
         if meta_per_cluster and i < len(meta_per_cluster) and meta_per_cluster[i]:
             meta_json = json.dumps(meta_per_cluster[i])
+        nm = int(n_members[i]) if n_members and i < len(n_members) else 0
+        medoid_id = (
+            medoid_interest_ids[i]
+            if medoid_interest_ids and i < len(medoid_interest_ids)
+            else None
+        )
+        is_noise = (
+            int(bool(is_noise_flags[i]))
+            if is_noise_flags and i < len(is_noise_flags)
+            else 0
+        )
         conn.execute(
-            "INSERT INTO clusters(id, centroid, label, n_members, updated_at, meta) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (i, _vec_to_json(np.asarray(c)), label, 0, now, meta_json),
+            "INSERT INTO clusters(id, centroid, label, n_members, updated_at, meta, "
+            "medoid_interest_id, cluster_method, is_noise) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                i,
+                _vec_to_json(np.asarray(c)),
+                label,
+                nm,
+                now,
+                meta_json,
+                medoid_id,
+                cluster_method,
+                is_noise,
+            ),
         )
     conn.commit()
 
@@ -192,7 +228,8 @@ def replace_clusters(
 def list_clusters(conn: sqlite3.Connection) -> list[dict]:
     """Return all clusters as a list of dicts (includes parsed `meta` if present)."""
     rows = conn.execute(
-        "SELECT id, centroid, label, n_members, meta FROM clusters"
+        "SELECT id, centroid, label, n_members, meta, medoid_interest_id, "
+        "cluster_method, is_noise FROM clusters"
     ).fetchall()
     return [
         {
@@ -201,6 +238,9 @@ def list_clusters(conn: sqlite3.Connection) -> list[dict]:
             "label": r[2],
             "n_members": r[3],
             "meta": json.loads(r[4]) if r[4] else None,
+            "medoid_interest_id": r[5],
+            "cluster_method": r[6],
+            "is_noise": bool(r[7]) if r[7] is not None else False,
         }
         for r in rows
     ]

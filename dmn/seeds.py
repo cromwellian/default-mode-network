@@ -3,6 +3,9 @@
 v0.1.2: every generator that consumes cluster info now reads `cluster.meta.theme` /
 `cluster.meta.subtopics` (synthesized by `dmn.labeling`) instead of the raw `cluster.label`,
 which used to leak browser-history URLs and YouTube titles into seed prompts.
+
+v0.4: cluster sampling is proportional to recency-weighted cluster mass; noise bucket
+clusters are skipped unless a serendipity roll allows them.
 """
 from __future__ import annotations
 
@@ -10,6 +13,8 @@ import random
 import re
 from dataclasses import dataclass
 from typing import Optional
+
+SERENDIPITY_NOISE_PROB = 0.05
 
 
 @dataclass
@@ -34,14 +39,49 @@ def _subtopics(cluster: dict) -> list[str]:
     return [s for s in subs if isinstance(s, str) and s.strip()]
 
 
+def _eligible_clusters(
+    clusters: list[dict], rng: random.Random, allow_noise: bool = False
+) -> list[dict]:
+    """Return clusters eligible for sampling (skip noise unless serendipity allows)."""
+    if allow_noise or rng.random() < SERENDIPITY_NOISE_PROB:
+        return clusters
+    non_noise = [c for c in clusters if not c.get("is_noise")]
+    return non_noise if non_noise else clusters
+
+
+def _cluster_mass(cluster: dict) -> float:
+    """Recency-weighted cluster mass for proportional sampling."""
+    meta = cluster.get("meta") or {}
+    mass = meta.get("cluster_mass")
+    if mass is not None:
+        return max(float(mass), 1e-6)
+    return max(float(cluster.get("n_members") or 1), 1.0)
+
+
+def _weighted_cluster_choice(clusters: list[dict], rng: random.Random) -> dict:
+    """Pick a cluster proportional to recency-weighted cluster mass."""
+    masses = [_cluster_mass(c) for c in clusters]
+    total = sum(masses)
+    if total <= 0:
+        return rng.choice(clusters)
+    r = rng.random() * total
+    upto = 0.0
+    for c, m in zip(clusters, masses):
+        upto += m
+        if r <= upto:
+            return c
+    return clusters[-1]
+
+
 def cold_start(clusters: list[dict], rng: random.Random) -> Seed:
-    """Pick a random cluster, then a random subtopic if available, else theme. Never raw text."""
-    if not clusters:
+    """Pick a cluster proportional to mass, then a random subtopic if available."""
+    eligible = _eligible_clusters(clusters, rng)
+    if not eligible:
         return Seed(
             text="What's something the world is currently underestimating?",
             source="cold",
         )
-    c = rng.choice(clusters)
+    c = _weighted_cluster_choice(eligible, rng)
     subs = _subtopics(c)
     if subs:
         st = rng.choice(subs)
@@ -50,10 +90,11 @@ def cold_start(clusters: list[dict], rng: random.Random) -> Seed:
 
 
 def cluster_sample(clusters: list[dict], llm, rng: random.Random) -> Seed:
-    """Pick a taste cluster, ask the LLM for 5 candidate questions grounded in a subtopic."""
-    if not clusters:
+    """Pick a taste cluster (mass-weighted), ask the LLM for candidate questions."""
+    eligible = _eligible_clusters(clusters, rng)
+    if not eligible:
         return cold_start([], rng)
-    c = rng.choice(clusters)
+    c = _weighted_cluster_choice(eligible, rng)
     theme = _theme(c)
     subs = _subtopics(c)
     subtopic = rng.choice(subs) if subs else ""
@@ -79,9 +120,10 @@ def cluster_sample(clusters: list[dict], llm, rng: random.Random) -> Seed:
 
 def cross_pollinate(clusters: list[dict], llm, rng: random.Random) -> Seed:
     """Pick the two MOST DISTANT clusters by min cosine sim; brainstorm at the intersection."""
-    if len(clusters) < 2:
+    eligible = [c for c in _eligible_clusters(clusters, rng) if not c.get("is_noise")]
+    if len(eligible) < 2:
         return cluster_sample(clusters, llm, rng)
-    a, b = _most_distant_pair(clusters, rng)
+    a, b = _most_distant_pair(eligible, rng)
     la, lb = _theme(a), _theme(b)
     sa = rng.choice(_subtopics(a)) if _subtopics(a) else ""
     sb = rng.choice(_subtopics(b)) if _subtopics(b) else ""

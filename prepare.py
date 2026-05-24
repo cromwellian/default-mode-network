@@ -1,12 +1,15 @@
 """DMN one-time setup: interview the user, run importers, cluster, and synthesize labels."""
 from __future__ import annotations
 
+import math
+import time
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import typer
 from rich.console import Console
+from rich.table import Table
 
 try:
     from dotenv import load_dotenv
@@ -37,14 +40,124 @@ BANNER = r"""
 """.strip("\n")
 
 # How many nearest-centroid members we surface to the LLM when synthesizing a label.
-# 12 is a sweet spot: enough to disambiguate, few enough that even a small local LLM
-# can hold them all in context without truncation.
 LABEL_SAMPLE_SIZE = 12
 
 
 def _banner() -> None:
     """Print the project banner."""
     console.print(f"[bold cyan]{BANNER.format(ver=__version__)}[/]")
+
+
+def composite_weights_for_interests(
+    interests: list[dict],
+    half_life_days: float = 90.0,
+) -> np.ndarray:
+    """Compute composite recency × visit_count weights for clustering."""
+    now = time.time()
+    weights: list[float] = []
+    for item in interests:
+        visit_count = item.get("visit_count")
+        if visit_count is None:
+            visit_count = max(1.0, math.expm1(float(item.get("weight", 1.0))))
+        ts = item.get("last_seen") or item.get("timestamp") or now
+        days_since = max(0.0, (now - float(ts)) / 86400.0)
+        w = taste.composite_weight(
+            float(visit_count),
+            days_since,
+            item.get("source") or "",
+            half_life_days=half_life_days,
+        )
+        weights.append(w)
+    return np.asarray(weights, dtype=np.float64)
+
+
+def run_clustering_pipeline(
+    vectors: np.ndarray,
+    interests: list[dict],
+    interest_ids: list[int],
+    *,
+    cluster_method: str = "hdbscan",
+    recency_half_life: float = 90.0,
+    min_cluster_size: Optional[int] = None,
+) -> tuple[taste.ClusterResult, np.ndarray, np.ndarray, list[bool]]:
+    """Cluster, pin manual tastes, add noise bucket; return result + cluster-index labels."""
+    weights = composite_weights_for_interests(interests, half_life_days=recency_half_life)
+    sources = [i.get("source") or "" for i in interests]
+
+    result = taste.cluster(
+        vectors,
+        sample_weight=weights,
+        method=cluster_method,
+        recency_weights=weights,
+        min_cluster_size=min_cluster_size,
+    )
+    result, weights = taste.pin_manual_interests(
+        result, vectors, sources, weights
+    )
+    result = taste.add_noise_cluster(result, vectors, weights)
+
+    unique_labels = sorted(set(int(l) for l in result.labels))
+    label_to_ci = {lab: ci for ci, lab in enumerate(unique_labels)}
+    synth_labels = np.array([label_to_ci[int(l)] for l in result.labels], dtype=int)
+
+    is_noise_flags = [False] * len(unique_labels)
+    if result.n_noise > 0:
+        is_noise_flags[-1] = True
+
+    return result, weights, synth_labels, is_noise_flags
+
+
+def persist_clusters(
+    conn,
+    result: taste.ClusterResult,
+    vectors: np.ndarray,
+    texts: list[str],
+    interest_ids: list[int],
+    synth_labels: np.ndarray,
+    weights: np.ndarray,
+    cluster_themes: list[str],
+    cluster_metas: list[dict],
+    is_noise_flags: list[bool],
+) -> None:
+    """Write clusters to SQLite with correct n_members and medoid ids."""
+    n = len(vectors)
+    unique_labels = sorted(set(int(l) for l in result.labels))
+    n_clusters = len(result.centroids)
+    n_members: list[int] = []
+    medoid_ids: list[int | None] = []
+    metas = [dict(m or {}) for m in cluster_metas]
+
+    for ci in range(n_clusters):
+        lab = unique_labels[ci] if ci < len(unique_labels) else ci
+        members = [j for j in range(n) if int(result.labels[j]) == lab]
+        n_members.append(len(members))
+        midx = (
+            result.medoid_indices[ci]
+            if ci < len(result.medoid_indices)
+            else (members[0] if members else 0)
+        )
+        medoid_ids.append(interest_ids[midx] if midx < len(interest_ids) else None)
+        mass = sum(float(weights[j]) for j in members)
+        if ci < len(metas):
+            metas[ci]["cluster_mass"] = mass
+            if result.silhouette is not None:
+                metas[ci]["silhouette"] = result.silhouette
+        else:
+            meta = {"cluster_mass": mass}
+            if result.silhouette is not None:
+                meta["silhouette"] = result.silhouette
+            metas.append(meta)
+
+    store.replace_clusters(
+        conn,
+        result.centroids,
+        cluster_themes,
+        meta_per_cluster=metas,
+        n_members=n_members,
+        medoid_interest_ids=medoid_ids,
+        cluster_method=result.method,
+        is_noise_flags=is_noise_flags,
+    )
 
 
 def main(
@@ -84,14 +197,27 @@ def main(
     keep_services: bool = typer.Option(
         False,
         "--keep-services",
-        help="Disable the v0.1.4 content-vs-service classifier "
-        "(login / dashboards / checkout / internal-corp tools survive).",
+        help="Disable the v0.1.4 content-vs-service classifier.",
     ),
     relabel_only: bool = typer.Option(
         False,
         "--relabel-only",
-        help="Skip importing + clustering; just re-synthesize cluster labels against the "
-        "existing profile. Fast iteration when label quality looks off.",
+        help="Skip importing + clustering; just re-synthesize cluster labels.",
+    ),
+    cluster_method: str = typer.Option(
+        "hdbscan",
+        "--cluster-method",
+        help="Clustering method: hdbscan, kmeans, or gmm.",
+    ),
+    recency_half_life: float = typer.Option(
+        90.0,
+        "--recency-half-life",
+        help="Half-life in days for recency decay in composite weights.",
+    ),
+    min_cluster_size: Optional[int] = typer.Option(
+        None,
+        "--min-cluster-size",
+        help="Override HDBSCAN min_cluster_size (default: max(15, n//80)).",
     ),
     dry_run: bool = typer.Option(
         False,
@@ -196,35 +322,70 @@ def main(
     console.print("Embedding…")
     texts = [i["text"] for i in interests]
     vectors = emb.embed(texts)
-    weights = np.asarray(
-        [float(i.get("weight", 1.0)) for i in interests], dtype=np.float64
-    )
 
     conn = store.connect()
+    interest_ids: list[int] = []
     for item, v in zip(interests, vectors):
-        store.add_interest(
+        iid = store.add_interest(
             conn,
             item["text"],
             item["source"],
             weight=float(item.get("weight", 1.0)),
             embedding=v.astype(np.float32),
+            last_seen=item.get("last_seen"),
         )
+        interest_ids.append(iid)
 
-    console.print("Clustering taste profile (visit-count-weighted)…")
-    centroids, labels = taste.cluster(vectors, sample_weight=weights)
+    console.print(
+        f"Clustering taste profile ({cluster_method}, recency-weighted)…"
+    )
+    result, weights, synth_labels, is_noise_flags = run_clustering_pipeline(
+        vectors,
+        interests,
+        interest_ids,
+        cluster_method=cluster_method,
+        recency_half_life=recency_half_life,
+        min_cluster_size=min_cluster_size,
+    )
+
+    if result.silhouette is not None:
+        console.print(f"Silhouette score (non-noise): [bold]{result.silhouette:.3f}[/]")
+    console.print(
+        f"Noise points: [bold]{result.n_noise}[/] "
+        f"({100.0 * result.n_noise / max(len(vectors), 1):.1f}%)"
+    )
 
     llm = get_llm(dry_run=dry_run)
     console.print(
         f"Synthesizing cluster labels via [bold]{llm.name}[/] LLM…"
     )
     cluster_themes, cluster_metas = _synthesize_all_labels(
-        centroids, vectors, texts, labels, llm
-    )
-    store.replace_clusters(
-        conn, centroids, cluster_themes, meta_per_cluster=cluster_metas
+        result.centroids, vectors, texts, synth_labels, llm, interest_ids, result.medoid_indices
     )
 
-    _print_cluster_summary(cluster_themes, cluster_metas, vectors, texts, labels, centroids)
+    if result.n_noise > 0 and is_noise_flags and is_noise_flags[-1]:
+        if cluster_themes[-1].startswith("cluster-"):
+            cluster_themes[-1] = "ambient / unclustered"
+        if cluster_metas:
+            cluster_metas[-1] = cluster_metas[-1] or {}
+            cluster_metas[-1]["theme"] = "ambient / unclustered"
+
+    persist_clusters(
+        conn,
+        result,
+        vectors,
+        texts,
+        interest_ids,
+        synth_labels,
+        weights,
+        cluster_themes,
+        cluster_metas,
+        is_noise_flags,
+    )
+
+    _print_cluster_table(
+        result, vectors, texts, synth_labels, cluster_themes, result.medoid_indices
+    )
 
     console.print(
         "\n[bold green]Profile ready.[/] Next: `uv run explore.py --dry-run --iterations 2`"
@@ -252,6 +413,7 @@ def _relabel_only(dry_run: bool, verbose: bool) -> None:
         ]
     ).astype(np.float32)
     texts = [i["text"] for i in interests]
+    interest_ids = [i["id"] for i in interests]
 
     centroids = np.stack(
         [
@@ -260,6 +422,14 @@ def _relabel_only(dry_run: bool, verbose: bool) -> None:
             if c["centroid"] is not None
         ]
     )
+    medoid_indices = [
+        next(
+            (j for j, i in enumerate(interests) if i["id"] == c.get("medoid_interest_id")),
+            0,
+        )
+        for c in clusters
+        if c["centroid"] is not None
+    ]
 
     labels = _assign_labels(vectors, centroids)
 
@@ -269,7 +439,7 @@ def _relabel_only(dry_run: bool, verbose: bool) -> None:
         f"via [bold]{llm.name}[/] LLM…"
     )
     cluster_themes, cluster_metas = _synthesize_all_labels(
-        centroids, vectors, texts, labels, llm
+        centroids, vectors, texts, labels, llm, interest_ids, medoid_indices
     )
     for ci, (theme, meta) in enumerate(zip(cluster_themes, cluster_metas)):
         if ci < len(clusters):
@@ -302,15 +472,25 @@ def _assign_labels(vectors: np.ndarray, centroids: np.ndarray) -> np.ndarray:
 
 
 def _members_for_cluster(
-    ci: int, vectors: np.ndarray, texts: list[str], labels: np.ndarray, centroid: np.ndarray
+    ci: int,
+    vectors: np.ndarray,
+    texts: list[str],
+    labels: np.ndarray,
+    centroid: np.ndarray,
+    medoid_idx: Optional[int] = None,
 ) -> list[str]:
-    """Return up to LABEL_SAMPLE_SIZE nearest-centroid member texts for a cluster (deduped)."""
+    """Return up to LABEL_SAMPLE_SIZE member texts for a cluster (medoid first)."""
     idx = [j for j, lab in enumerate(labels) if int(lab) == ci]
     if not idx:
         return []
-    ranked = sorted(idx, key=lambda j: float(np.linalg.norm(vectors[j] - centroid)))
     seen: set[str] = set()
     chosen: list[str] = []
+    if medoid_idx is not None and medoid_idx in idx:
+        t = (texts[medoid_idx] or "").strip()
+        if t:
+            chosen.append(t[:200])
+            seen.add(t.lower())
+    ranked = sorted(idx, key=lambda j: float(np.linalg.norm(vectors[j] - centroid)))
     for j in ranked:
         t = (texts[j] or "").strip()
         key = t.lower()
@@ -329,12 +509,15 @@ def _synthesize_all_labels(
     texts: list[str],
     labels: np.ndarray,
     llm,
+    interest_ids: Optional[list[int]] = None,
+    medoid_indices: Optional[list[int]] = None,
 ) -> tuple[list[str], list[dict]]:
     """Run `labeling.synthesize_label` on every cluster's nearest-centroid members."""
     themes: list[str] = []
     metas: list[dict] = []
     for ci in range(len(centroids)):
-        members = _members_for_cluster(ci, vectors, texts, labels, centroids[ci])
+        midx = medoid_indices[ci] if medoid_indices and ci < len(medoid_indices) else None
+        members = _members_for_cluster(ci, vectors, texts, labels, centroids[ci], midx)
         if not members:
             themes.append(f"cluster-{ci}")
             metas.append({})
@@ -343,6 +526,35 @@ def _synthesize_all_labels(
         themes.append(cl.theme or f"cluster-{ci}")
         metas.append(cl.to_meta())
     return themes, metas
+
+
+def _print_cluster_table(
+    result: taste.ClusterResult,
+    vectors: np.ndarray,
+    texts: list[str],
+    labels: np.ndarray,
+    themes: list[str],
+    medoid_indices: list[int],
+) -> None:
+    """Print cluster distribution table with medoid text and member counts."""
+    n = len(vectors)
+    table = Table(title="Cluster distribution", show_lines=False)
+    table.add_column("id", justify="right")
+    table.add_column("n", justify="right")
+    table.add_column("%", justify="right")
+    table.add_column("medoid (truncated)")
+    table.add_column("label")
+
+    order = sorted(range(len(result.centroids)), key=lambda ci: -int(np.sum(labels == ci)))
+    for ci in order:
+        count = int(np.sum(labels == ci))
+        pct = 100.0 * count / max(n, 1)
+        midx = medoid_indices[ci] if ci < len(medoid_indices) else 0
+        medoid_text = (texts[midx] if midx < len(texts) else "")[:80]
+        theme = themes[ci] if ci < len(themes) else f"cluster-{ci}"
+        table.add_row(str(ci), str(count), f"{pct:.1f}", medoid_text, theme)
+    console.print()
+    console.print(table)
 
 
 def _print_cluster_summary(
@@ -380,7 +592,7 @@ def _synthetic_profile() -> list[dict]:
         "the design language of early Macintosh icons",
         "cosmic-ray detection in old photographs",
     ]
-    return [{"text": s, "source": "synthetic"} for s in seeds]
+    return [{"text": s, "source": "synthetic", "visit_count": 1} for s in seeds]
 
 
 if __name__ == "__main__":

@@ -15,6 +15,35 @@ DMN's seed quality lives or dies on its cluster labels. Done badly, the seed gen
 
 If a cluster's theme looks off, run `uv run prepare.py --relabel-only` to re-synthesize labels against the existing profile (no re-import, no re-cluster — fast). The dry-run path (`--dry-run`) uses a deterministic word-frequency fallback so you can iterate without burning API tokens.
 
+## Clustering (v0.4)
+
+DMN defaults to **HDBSCAN** on L2-normalized embeddings with **medoid** cluster representatives (not K-means centroids). Sample weights combine `log1p(visit_count)` with exponential recency decay; manual and interview interests are pinned as high-recency seeds.
+
+```bash
+# Default: HDBSCAN + recency-weighted taste profile
+uv run prepare.py --import browser
+
+# Explicit method selection
+uv run prepare.py --cluster-method hdbscan   # default
+uv run prepare.py --cluster-method kmeans    # legacy K-means (k=8)
+uv run prepare.py --cluster-method gmm       # Gaussian mixture + BIC k-selection
+
+# Tune recency half-life (days) and HDBSCAN min cluster size
+uv run prepare.py --recency-half-life 90 --min-cluster-size 20
+```
+
+**Noise bucket:** points HDBSCAN cannot assign land in an `ambient / unclustered` cluster (`is_noise=1`). Seed sampling skips this bucket unless a small serendipity roll hits (~5%). Upgrade an existing profile:
+
+```bash
+uv run scripts/migrate_v0_4.py
+```
+
+Inspect clusters (medoid text, method, noise flag, silhouette):
+
+```bash
+uv run scripts/inspect_clusters.py --top 10
+```
+
 ## Upgrading from earlier dev versions
 
 If you ran v0.1.0 / v0.1.1 against your real browser history, your existing SQLite carries the noisy rows and URL-flavored cluster labels. One-shot fix:
