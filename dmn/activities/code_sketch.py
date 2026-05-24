@@ -18,6 +18,12 @@ from dmn.activities._helpers import (
     write_artifact_dir,
 )
 from dmn.generators import Artifact
+from dmn.grounding import (
+    gather_grounding,
+    grounding_block,
+    grounding_footer,
+    grounding_fulfillment,
+)
 from dmn.sandbox import run_python
 from dmn.seeds import Seed
 
@@ -42,6 +48,7 @@ def _system_for_budget(code_budget: str) -> str:
 
 USER_TEMPLATE = (
     "Seed: {seed_text}\n\n"
+    "{grounding}\n\n"
     "Write a Python sketch ({budget_note}, stdlib + numpy only) that explores this. "
     "Be concrete and runnable. Output two fenced blocks in this order:\n\n"
     "1. ```python\n# the program\n```\n"
@@ -107,7 +114,8 @@ class CodeSketchActivity:
         if ctx.execute:
             execution = run_python(sketch_path, mode=ctx.sandbox, timeout=ctx.timeout_s)
 
-        body = self._render_body(seed, code, meta, commentary, execution)
+        refs = gather_grounding(seed, ctx)
+        body = self._render_body(seed, code, meta, commentary, execution) + grounding_footer(refs)
         return ActivityResult(
             title=meta.get("what_it_does") or f"Code sketch: {seed.text[:60]}",
             body_md=body,
@@ -118,6 +126,10 @@ class CodeSketchActivity:
                 "novelty": meta.get("novelty"),
                 "limitations": meta.get("limitations"),
                 "lines": len(code.splitlines()),
+                "fulfillment": grounding_fulfillment(refs),
+                "grounding": [
+                    {"title": r.title, "url": r.url, "source": r.source} for r in refs
+                ],
             },
             execution=execution,
         )
@@ -134,7 +146,11 @@ class CodeSketchActivity:
             }.get(ctx.code_budget, "≤100 lines")
             resp = ctx.llm.complete(
                 system=_system_for_budget(ctx.code_budget),
-                user=USER_TEMPLATE.format(seed_text=seed.text, budget_note=budget_note),
+                user=USER_TEMPLATE.format(
+                    seed_text=seed.text,
+                    budget_note=budget_note,
+                    grounding=grounding_block(gather_grounding(seed, ctx)),
+                ),
                 max_tokens=max_tokens,
             )
             text = (resp.text or "").strip()

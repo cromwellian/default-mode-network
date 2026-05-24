@@ -142,6 +142,69 @@ class FrontierUCBTests(unittest.TestCase):
         self.assertIsNone(f.pop_best(total_iters=10, explore_c=0.1))
 
 
+class GroundingTests(unittest.TestCase):
+    """Creation activities must consume external references, not hallucinate from the seed."""
+
+    def _ctx(self, dry_run=False):
+        from dmn.activities import ActivityContext
+
+        return ActivityContext(
+            llm=object(),
+            embed_fn=lambda t: np.zeros((len(t), 4), dtype=np.float32),
+            clusters=[], centroids=[], recent_embs=[],
+            rng=random.Random(0), dry_run=dry_run,
+        )
+
+    def test_gather_uses_clean_query_and_caches(self):
+        import dmn.grounding as g
+        from dmn.tools import ResearchItem
+
+        calls = {"queries": []}
+
+        def fake_exec(tools, query, verbose=False, log=None):
+            calls["queries"].append(query)
+            return [ResearchItem(title="Bandit Algorithms", summary="UCB1 etc.",
+                                 url="http://x", source="arxiv")]
+
+        g.execute_tools = fake_exec
+        g.available_tools_for = lambda dry: ["arxiv", "wikipedia"]
+        ctx = self._ctx()
+        seed = Seed(text="What's a fresh angle on multi-armed bandits?",
+                    source="cold", query="multi-armed bandits")
+        out1 = g.gather_grounding(seed, ctx)
+        out2 = g.gather_grounding(seed, ctx)  # cached: no second search
+        self.assertEqual(len(out1), 1)
+        self.assertEqual(calls["queries"], ["multi-armed bandits"])  # clean query, one call
+        self.assertIs(out1, out2)
+
+    def test_ground_disabled_returns_empty(self):
+        import dmn.grounding as g
+        ctx = self._ctx()
+        ctx.ground = False
+        out = g.gather_grounding(Seed(text="x", source="cold", query="x"), ctx)
+        self.assertEqual(out, [])
+
+    def test_block_instructs_to_build_on_refs(self):
+        import dmn.grounding as g
+        from dmn.tools import ResearchItem
+        refs = [ResearchItem(title="Paper A", summary="s", url="http://a", source="arxiv")]
+        block = g.grounding_block(refs)
+        self.assertIn("Paper A", block)
+        self.assertIn("build on", block.lower())
+
+    def test_block_falls_back_when_no_refs(self):
+        import dmn.grounding as g
+        self.assertIn("first principles", g.grounding_block([]).lower())
+
+    def test_fulfillment_rewards_grounding(self):
+        import dmn.grounding as g
+        from dmn.tools import ResearchItem
+        r = ResearchItem(title="t", summary="s", url="u", source="arxiv")
+        self.assertEqual(g.grounding_fulfillment([r, r]), 1.0)
+        self.assertEqual(g.grounding_fulfillment([r]), 0.85)
+        self.assertLess(g.grounding_fulfillment([]), 0.85)  # ungrounded penalized
+
+
 class FencedExtractionTests(unittest.TestCase):
     """Guards for the 'always the same dry-run app' bug: truncated output must not yield
     None (which made callers fall back to a canned stub)."""

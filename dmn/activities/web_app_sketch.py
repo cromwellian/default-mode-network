@@ -7,6 +7,12 @@ from typing import Optional
 from dmn.activities import ActivityContext, ActivityResult, register
 from dmn.activities._helpers import extract_html, extract_json_meta, slugify, write_artifact_dir
 from dmn.generators import Artifact
+from dmn.grounding import (
+    gather_grounding,
+    grounding_block,
+    grounding_footer,
+    grounding_fulfillment,
+)
 from dmn.seeds import Seed
 
 SYSTEM = (
@@ -18,6 +24,7 @@ SYSTEM = (
 
 USER_TEMPLATE = (
     "Seed: {seed_text}\n\n"
+    "{grounding}\n\n"
     "Create a standalone `index.html` for an interactive simulation/tool/app related to "
     "the seed. Requirements:\n"
     "- all CSS and JavaScript inline\n"
@@ -127,7 +134,8 @@ class WebAppSketchActivity:
             generator=self.name,
             meta={"manifest": str(manifest_path), **manifest},
         )
-        body = self._render_body(seed, artifact, manifest)
+        refs = gather_grounding(seed, ctx)
+        body = self._render_body(seed, artifact, manifest) + grounding_footer(refs)
         return ActivityResult(
             title=manifest["title"],
             body_md=body,
@@ -138,6 +146,10 @@ class WebAppSketchActivity:
                 "summary": manifest["summary"],
                 "interaction": manifest["interaction"],
                 "artifact_paths": [str(index_path), str(manifest_path)],
+                "fulfillment": grounding_fulfillment(refs),
+                "grounding": [
+                    {"title": r.title, "url": r.url, "source": r.source} for r in refs
+                ],
             },
         )
 
@@ -158,7 +170,10 @@ class WebAppSketchActivity:
         try:
             resp = ctx.llm.complete(
                 system=SYSTEM,
-                user=USER_TEMPLATE.format(seed_text=seed.text),
+                user=USER_TEMPLATE.format(
+                    seed_text=seed.text,
+                    grounding=grounding_block(gather_grounding(seed, ctx)),
+                ),
                 max_tokens=max_tokens,
             )
             text = (resp.text or "").strip()

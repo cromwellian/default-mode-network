@@ -17,6 +17,12 @@ from dmn.activities._helpers import (
     write_artifact_dir,
 )
 from dmn.generators import Artifact
+from dmn.grounding import (
+    gather_grounding,
+    grounding_block,
+    grounding_footer,
+    grounding_fulfillment,
+)
 from dmn.sandbox import run_python
 from dmn.seeds import Seed
 
@@ -29,6 +35,7 @@ SYSTEM = (
 
 USER_TEMPLATE = (
     "Seed: {seed_text}\n\n"
+    "{grounding}\n\n"
     "Design a tiny ML experiment that probes a question raised by this seed. "
     "Use synthetic data (numpy). Train for a small number of steps. Print intermediate "
     "loss every few steps and a final `METRIC: <name>=<value>` line.\n\n"
@@ -56,11 +63,14 @@ class MlExperimentActivity:
     def run(self, seed: Seed, ctx: ActivityContext) -> ActivityResult:
         slug = slugify(seed.text, n=50)
         out_dir = write_artifact_dir(ctx.artifact_root, self.name, slug)
+        refs = gather_grounding(seed, ctx)
         try:
             resp = ctx.llm.complete(
                 system=SYSTEM,
-                user=USER_TEMPLATE.format(seed_text=seed.text),
-                max_tokens=2000,
+                user=USER_TEMPLATE.format(
+                    seed_text=seed.text, grounding=grounding_block(refs)
+                ),
+                max_tokens=4000,
             )
             text = (resp.text or "").strip()
         except Exception:
@@ -142,7 +152,7 @@ class MlExperimentActivity:
 
         return ActivityResult(
             title=meta.get("hypothesis") or f"ML experiment: {seed.text[:60]}",
-            body_md="\n".join(body_lines),
+            body_md="\n".join(body_lines) + grounding_footer(refs),
             artifacts=artifacts,
             embedding_text=seed.text + " :: " + (meta.get("hypothesis") or "")[:300],
             metadata={
@@ -151,6 +161,10 @@ class MlExperimentActivity:
                 "expected_range": meta.get("expected_range"),
                 "torch_present": torch_present,
                 "lines": len(code.splitlines()),
+                "fulfillment": grounding_fulfillment(refs),
+                "grounding": [
+                    {"title": r.title, "url": r.url, "source": r.source} for r in refs
+                ],
             },
             execution=execution,
         )

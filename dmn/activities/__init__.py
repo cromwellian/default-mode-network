@@ -56,6 +56,8 @@ class ActivityContext:
     timeout_s: float = 30.0
     artifact_root: Path = Path("data/artifacts")
     code_budget: str = "small"
+    ground: bool = True  # creation activities consume external references before riffing
+    grounding_cache: dict = field(default_factory=dict)  # query -> [ResearchItem], per run
 
 
 @runtime_checkable

@@ -171,6 +171,11 @@ def main(
         "--explore",
         help="UCB exploration weight for frontier selection (0 = pure best-first/greedy).",
     ),
+    ground: bool = typer.Option(
+        True,
+        "--ground/--no-ground",
+        help="Consume external references before creation activities riff (code/app/web/algo/ml).",
+    ),
     code_budget: str = typer.Option(
         "small",
         "--code-budget",
@@ -241,6 +246,7 @@ def main(
         verbose=verbose,
         timeout_s=_code_timeout(code_budget),
         code_budget=code_budget,
+        ground=ground,
     )
     store.start_run(
         conn,

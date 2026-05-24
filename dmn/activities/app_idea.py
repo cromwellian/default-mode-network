@@ -8,6 +8,12 @@ from __future__ import annotations
 
 from dmn.activities import ActivityContext, ActivityResult, register
 from dmn.activities._helpers import extract_json_meta
+from dmn.grounding import (
+    gather_grounding,
+    grounding_block,
+    grounding_footer,
+    grounding_fulfillment,
+)
 from dmn.seeds import Seed
 
 SYSTEM = (
@@ -18,6 +24,7 @@ SYSTEM = (
 
 USER_TEMPLATE = (
     "Seed: {seed_text}\n\n"
+    "{grounding}\n\n"
     "Write the 1-page PRD as described in your system instructions. After the PRD, "
     "append a fenced ```json block with: "
     "`name` (short product name), `elevator_pitch` (≤140 chars), "
@@ -74,10 +81,13 @@ class AppIdeaActivity:
         return True
 
     def run(self, seed: Seed, ctx: ActivityContext) -> ActivityResult:
+        refs = gather_grounding(seed, ctx)
         try:
             resp = ctx.llm.complete(
                 system=SYSTEM,
-                user=USER_TEMPLATE.format(seed_text=seed.text),
+                user=USER_TEMPLATE.format(
+                    seed_text=seed.text, grounding=grounding_block(refs)
+                ),
                 max_tokens=1500,
             )
             raw = (resp.text or "").strip()
@@ -97,7 +107,7 @@ class AppIdeaActivity:
                 "",
                 raw,
             ]
-        )
+        ) + grounding_footer(refs)
         return ActivityResult(
             title=meta.get("name") or f"App idea: {seed.text[:60]}",
             body_md=body,
@@ -106,6 +116,10 @@ class AppIdeaActivity:
                 "name": meta.get("name"),
                 "elevator_pitch": meta.get("elevator_pitch"),
                 "complexity": meta.get("complexity"),
+                "fulfillment": grounding_fulfillment(refs),
+                "grounding": [
+                    {"title": r.title, "url": r.url, "source": r.source} for r in refs
+                ],
             },
         )
 
