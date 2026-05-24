@@ -67,13 +67,17 @@ class AnthropicLLM:
 
     name = "anthropic"
 
-    def __init__(self, model: str = "claude-sonnet-4-5-20250929") -> None:
+    def __init__(self, model: Optional[str] = None) -> None:
         try:
             import anthropic  # type: ignore
         except ImportError as e:  # pragma: no cover
             raise RuntimeError("anthropic not installed; `uv add anthropic`") from e
         self.client = anthropic.Anthropic()
-        self.model = model
+        self.model = (
+            model
+            or os.environ.get("DMN_LLM_MODEL")
+            or "claude-sonnet-4-5-20250929"
+        )
 
     def complete(self, system: str, user: str, max_tokens: int = 1024) -> LLMResponse:
         """Send a single-turn message to Claude and return the text body."""
@@ -92,13 +96,13 @@ class OpenAILLM:
 
     name = "openai"
 
-    def __init__(self, model: str = "gpt-4o-mini") -> None:
+    def __init__(self, model: Optional[str] = None) -> None:
         try:
             from openai import OpenAI  # type: ignore
         except ImportError as e:  # pragma: no cover
             raise RuntimeError("openai not installed; `uv add openai`") from e
         self.client = OpenAI()
-        self.model = model
+        self.model = model or os.environ.get("DMN_LLM_MODEL") or "gpt-4o-mini"
 
     def complete(self, system: str, user: str, max_tokens: int = 1024) -> LLMResponse:
         """Send a single-turn chat completion and return the assistant text."""
