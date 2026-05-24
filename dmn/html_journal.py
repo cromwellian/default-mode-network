@@ -28,6 +28,7 @@ ACTIVITY_COLORS: dict[str, str] = {
     "image_riff": "#e08aaa",
     "music_riff": "#b088e0",
     "video_riff": "#6898d4",
+    "web_app_sketch": "#58c4c8",
     "mood_journal": "#d4a888",
 }
 
@@ -219,6 +220,14 @@ article.brief-body img {
   margin: 1rem 0;
 }
 article.brief-body audio { width: 100%; margin: 1rem 0; }
+article.brief-body iframe {
+  width: 100%;
+  min-height: 440px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #111;
+  margin: 1rem 0;
+}
 article.brief-body pre {
   background: var(--code-bg);
   border: 1px solid var(--border);
@@ -723,10 +732,16 @@ def _body_preview_text(path: str, max_lines: int = 4) -> str:
 
 
 def _latest_session_nodes(entries: list[dict]) -> list[dict]:
-    """Pick the most recent tree root and return its full subtree."""
+    """Pick the latest run_id when present, else latest tree root subtree."""
     by_id = {int(e["id"]): e for e in entries if e.get("id") is not None}
     if not by_id:
         return []
+
+    run_nodes = [e for e in by_id.values() if e.get("run_id") and e.get("mutation")]
+    if run_nodes:
+        latest = max(run_nodes, key=lambda e: e.get("created_at") or 0.0)
+        latest_run = latest.get("run_id")
+        return [e for e in by_id.values() if e.get("run_id") == latest_run]
 
     roots = [
         e

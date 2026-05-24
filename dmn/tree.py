@@ -85,6 +85,10 @@ class Frontier:
         """Snapshot of node ids currently in the frontier."""
         return list(self._best_score.keys())
 
+    def discard(self, node_id: int) -> None:
+        """Remove a node from the live frontier; stale heap entries are skipped later."""
+        self._best_score.pop(int(node_id), None)
+
 
 # ----- Pruner -----------------------------------------------------------------
 

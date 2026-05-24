@@ -23,17 +23,25 @@ from dmn.paths import artifact_href_for_journal
 from dmn.sandbox import run_python
 from dmn.seeds import Seed
 
-SYSTEM = (
-    "You explore algorithms by writing tiny demonstration scripts. "
-    "Constraints: ≤80 lines, stdlib + numpy. matplotlib is OPTIONAL — if you use it, "
-    "write the plot to a file like `plot.png` (do NOT call plt.show()), and ALSO include "
-    "a fallback ASCII visualization printed to stdout. Be concrete and educational."
-)
+def _system_for_budget(code_budget: str) -> str:
+    budget = (code_budget or "small").lower()
+    if budget == "large":
+        size = "Up to ~350 lines; multi-function demos are welcome when they clarify the idea."
+    elif budget == "medium":
+        size = "Up to ~250 lines; multiple functions are welcome."
+    else:
+        size = "≤80 lines."
+    return (
+        "You explore algorithms by writing demonstration scripts. "
+        f"Constraints: {size} stdlib + numpy. matplotlib is OPTIONAL — if you use it, "
+        "write the plot to a file like `plot.png` (do NOT call plt.show()), and ALSO include "
+        "a fallback ASCII visualization printed to stdout. Be concrete and educational."
+    )
 
 USER_TEMPLATE = (
     "Seed: {seed_text}\n\n"
     "1. Pick ONE algorithm or technique adjacent to this seed. Name it clearly.\n"
-    "2. Write a runnable demo script that illustrates it (≤80 lines, stdlib + numpy, "
+    "2. Write a runnable demo script that illustrates it ({budget_note}, stdlib + numpy, "
     "matplotlib optional).\n"
     "3. The script's `__main__` should produce both:\n"
     "   - a small ASCII visualization printed to stdout (always)\n"
@@ -155,10 +163,15 @@ class AlgorithmExploreActivity:
 
     def _gen(self, seed: Seed, ctx: ActivityContext) -> tuple[str, dict, str]:
         try:
+            max_tokens = 3500 if ctx.code_budget == "medium" else 5000 if ctx.code_budget == "large" else 2000
+            budget_note = {
+                "medium": "up to about 250 lines",
+                "large": "up to about 350 lines",
+            }.get(ctx.code_budget, "≤80 lines")
             resp = ctx.llm.complete(
-                system=SYSTEM,
-                user=USER_TEMPLATE.format(seed_text=seed.text),
-                max_tokens=2000,
+                system=_system_for_budget(ctx.code_budget),
+                user=USER_TEMPLATE.format(seed_text=seed.text, budget_note=budget_note),
+                max_tokens=max_tokens,
             )
             text = (resp.text or "").strip()
         except Exception:

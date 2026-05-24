@@ -15,7 +15,9 @@ mutations (drift / deepen / branch / retool / modality_switch). Flat-mode behavi
 from __future__ import annotations
 
 import random
+import sys
 import time
+import uuid
 from typing import Optional
 
 import numpy as np
@@ -144,11 +146,38 @@ def main(
         "--resume",
         help="Continue from the existing open frontier in SQLite instead of fresh roots.",
     ),
+    beam_width: int = typer.Option(
+        0,
+        "--beam-width",
+        help="Keep only the top N open frontier leaves after each expansion (0 disables).",
+    ),
+    patience: int = typer.Option(
+        0,
+        "--patience",
+        help="Stop/restart after this many expansions without meaningful best-score improvement.",
+    ),
+    until_dopamine: Optional[float] = typer.Option(
+        None,
+        "--until-dopamine",
+        help="Stop early once the global best dopamine reaches this score.",
+    ),
+    min_improvement: float = typer.Option(
+        0.01,
+        "--min-improvement",
+        help="Minimum best-score delta that resets --patience.",
+    ),
+    code_budget: str = typer.Option(
+        "small",
+        "--code-budget",
+        help="Budget for code-generating activities: small | medium | large.",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Run a best-first tree-search wander session and write briefs + journal/tree.md."""
     console.print(f"[bold magenta]{BANNER.format(ver=__version__)}[/]")
     rng = random.Random()
+    run_id = uuid.uuid4().hex[:12]
+    started_at = time.time()
 
     llm = get_llm(dry_run=dry_run)
     console.print(f"LLM provider: [bold]{llm.name}[/]")
@@ -162,6 +191,10 @@ def main(
     if execute and sandbox_mode == "none":
         console.print("[yellow]--execute requested but --sandbox none; ignoring --execute[/]")
         execute = False
+    code_budget = code_budget.lower().strip()
+    if code_budget not in {"small", "medium", "large"}:
+        console.print("[yellow]unknown --code-budget; using small[/]")
+        code_budget = "small"
     mix = (
         acts.parse_mix(activity_mix)
         if activity_mix
@@ -201,6 +234,14 @@ def main(
         execute=execute,
         sandbox=sandbox_mode,
         verbose=verbose,
+        timeout_s=_code_timeout(code_budget),
+        code_budget=code_budget,
+    )
+    store.start_run(
+        conn,
+        run_id,
+        command=" ".join(sys.argv),
+        notes=f"activity_mix={activity_mix or activities}; code_budget={code_budget}",
     )
 
     pruner = tree.Pruner(
@@ -212,6 +253,11 @@ def main(
     deadline = time.time() + minutes * 60 if minutes else None
     n_done = 0
     session_node_ids: list[int] = []
+    best_score = 0.0
+    stale_expansions = 0
+    patience_restarts = 0
+    patience_triggered = False
+    beam_pruned_count = 0
 
     if resume:
         for node in store.list_open_frontier(conn):
@@ -256,12 +302,26 @@ def main(
                 forced_activity=None,
                 forced_tools=None,
                 mix=mix,
+                run_id=run_id,
+                activity_budget=activity_mix or activities,
             )
             if child_id is None:
                 continue
+            improvement = max(0.0, score - best_score)
+            store.update_journal_last_improvement(conn, child_id, improvement)
+            if improvement >= min_improvement:
+                best_score = max(best_score, score)
+                stale_expansions = 0
+            else:
+                best_score = max(best_score, score)
             frontier.push(child_id, score, payload={"depth": 0})
             session_node_ids.append(child_id)
             n_done += 1
+            beam_pruned_count += _prune_frontier_to_beam(
+                conn, frontier, run_id, beam_width
+            )
+            if until_dopamine is not None and best_score >= until_dopamine:
+                break
 
     # --- best-first expansion --------------------------------------------------
     available = available_tools_for(dry_run)
@@ -271,6 +331,51 @@ def main(
             break
         if iterations is not None and n_done >= iterations:
             break
+        if until_dopamine is not None and best_score >= until_dopamine:
+            console.print(
+                f"[green]stopping: best dopamine {best_score:.3f} >= {until_dopamine:.3f}[/]"
+            )
+            break
+        if patience and stale_expansions >= patience:
+            patience_triggered = True
+            if patience_restarts >= max(1, root_count):
+                console.print("[yellow]stopping: patience exhausted after restarts[/]")
+                break
+            console.print("[yellow]patience triggered; restarting from a fresh root[/]")
+            patience_restarts += 1
+            stale_expansions = 0
+            root_seed = _pick_root_seed(clusters, llm, rng)
+            child_id, score, _ = _expand_brief(
+                conn=conn,
+                chosen_seed=root_seed,
+                parent_id=None,
+                depth=0,
+                mutation="root",
+                clusters=clusters,
+                centroids=centroids,
+                recent_embs=recent_embs,
+                ctx=ctx,
+                rng=rng,
+                verbose=verbose,
+                generate=generate,
+                enabled_modalities=enabled_modalities,
+                forced_activity=None,
+                forced_tools=None,
+                mix=mix,
+                run_id=run_id,
+                activity_budget=activity_mix or activities,
+            )
+            if child_id is not None:
+                improvement = max(0.0, score - best_score)
+                store.update_journal_last_improvement(conn, child_id, improvement)
+                best_score = max(best_score, score)
+                frontier.push(child_id, score, payload={"depth": 0})
+                session_node_ids.append(child_id)
+                n_done += 1
+                beam_pruned_count += _prune_frontier_to_beam(
+                    conn, frontier, run_id, beam_width
+                )
+            continue
 
         if frontier.size() == 0 or rng.random() < restart_prob:
             if iterations is not None and n_done >= iterations:
@@ -294,17 +399,30 @@ def main(
                 forced_activity=None,
                 forced_tools=None,
                 mix=mix,
+                run_id=run_id,
+                activity_budget=activity_mix or activities,
             )
             if child_id is not None:
+                improvement = max(0.0, score - best_score)
+                store.update_journal_last_improvement(conn, child_id, improvement)
+                if improvement >= min_improvement:
+                    best_score = max(best_score, score)
+                    stale_expansions = 0
+                else:
+                    best_score = max(best_score, score)
                 frontier.push(child_id, score, payload={"depth": 0})
                 session_node_ids.append(child_id)
                 n_done += 1
+                beam_pruned_count += _prune_frontier_to_beam(
+                    conn, frontier, run_id, beam_width
+                )
             continue
 
         node_summary = frontier.pop_best()
         if node_summary is None:
             continue
         parent_id = int(node_summary["id"])
+        store.increment_journal_visit(conn, parent_id)
         parent_node = store.get_journal(conn, parent_id)
         if parent_node is None:
             continue
@@ -320,6 +438,7 @@ def main(
             all_ops.append("modality_switch")
         ops = rng.sample(all_ops, k=min(children_per_expansion, len(all_ops)))
         children: list[tuple[int, float, np.ndarray]] = []
+        expansion_best_before = best_score
         for op in ops:
             if iterations is not None and n_done >= iterations:
                 break
@@ -360,9 +479,14 @@ def main(
                 forced_activity=forced_activity,
                 forced_tools=forced,
                 mix=mix,
+                run_id=run_id,
+                activity_budget=activity_mix or activities,
             )
             if child_id is None:
                 continue
+            improvement = max(0.0, score - best_score)
+            store.update_journal_last_improvement(conn, child_id, improvement)
+            best_score = max(best_score, score)
             children.append((child_id, score, child_emb))
             session_node_ids.append(child_id)
             n_done += 1
@@ -395,11 +519,16 @@ def main(
 
         if not surviving:
             store.update_journal_status(conn, parent_id, "leaf")
+        store.increment_journal_expanded(conn, parent_id)
+        batch_improvement = best_score - expansion_best_before
+        if batch_improvement >= min_improvement:
+            stale_expansions = 0
+        else:
+            stale_expansions += 1
+        beam_pruned_count += _prune_frontier_to_beam(conn, frontier, run_id, beam_width)
 
     # --- write outputs ---------------------------------------------------------
-    session_nodes = [
-        n for n in (store.get_journal(conn, nid) for nid in session_node_ids) if n
-    ]
+    session_nodes = store.list_journal_by_run(conn, run_id, limit=1000)
     journal.write_tree_md(session_nodes)
 
     entries = store.list_journal(conn, limit=500)
@@ -413,7 +542,19 @@ def main(
     console.print(
         f"\n[bold]Wander complete.[/] {n_done} brief(s) "
         f"({pruned_count} pruned, {leaf_count} leaf, {open_count} open). "
+        f"best={best_score:.3f}; beam_pruned={beam_pruned_count}; "
+        f"patience_triggered={patience_triggered}. "
         f"Tree → [dim]journal/tree.html[/]"
+    )
+    store.finish_run(
+        conn,
+        run_id,
+        best_score=best_score,
+        brief_count=n_done,
+        notes=(
+            f"beam_pruned={beam_pruned_count}; patience_triggered={patience_triggered}; "
+            f"duration_s={time.time() - started_at:.1f}"
+        ),
     )
 
 
@@ -423,9 +564,9 @@ def main(
 def _pick_root_seed(clusters: list[dict], llm, rng: random.Random) -> seeds.Seed:
     """Sample a root seed using cluster-grounded strategies (no drift — drift wants a parent)."""
     pick = rng.random()
-    if pick < 0.4 or not clusters:
+    if pick < 0.45 or not clusters:
         return seeds.cold_start(clusters, rng)
-    if pick < 0.8:
+    if pick < 0.90:
         return seeds.cluster_sample(clusters, llm, rng)
     return seeds.cross_pollinate(clusters, llm, rng)
 
@@ -448,6 +589,8 @@ def _expand_brief(
     forced_activity: Optional[str],
     forced_tools: Optional[list[str]],
     mix: dict[str, int],
+    run_id: str,
+    activity_budget: str,
 ) -> tuple[Optional[int], float, Optional[np.ndarray]]:
     """Run one node: pick activity, run, score, persist, backprop.
 
@@ -464,7 +607,9 @@ def _expand_brief(
     if forced_activity:
         activity = acts.get(forced_activity) or acts.get("research")
     else:
-        activity = acts.pick_activity(mix, ctx, rng, cluster_label=cluster_label)
+        activity = acts.pick_activity(
+            mix, ctx, rng, cluster_label=cluster_label, seed_text=chosen_seed.text
+        )
     if activity is None:
         console.print("[red]  no activity available; skipping[/]")
         return None, 0.0, None
@@ -481,6 +626,7 @@ def _expand_brief(
     # Forced tools only meaningful for the research activity. Patch the seed via a
     # small attribute mutation isn't possible (frozen dataclass) — we instead let the
     # research activity recompute its plan. retool acts as a hint; v0.4 work.
+    node_started = time.time()
     try:
         result: ActivityResult = activity.run(chosen_seed, ctx)
     except Exception as e:
@@ -527,6 +673,11 @@ def _expand_brief(
         execution=result.execution,
         fulfillment=result.metadata.get("fulfillment"),
         fulfillment_breakdown=result.metadata.get("fulfillment_breakdown"),
+        run_id=run_id,
+        visit_count=0,
+        expanded_count=0,
+        activity_budget=activity_budget,
+        cost_seconds=time.time() - node_started,
     )
     node_id = store.add_journal(
         conn,
@@ -545,6 +696,11 @@ def _expand_brief(
         activity=activity.name,
         artifact_paths=[str(a.bytes_path) for a in result.artifacts if a.bytes_path],
         execution_result=result.execution,
+        run_id=run_id,
+        visit_count=0,
+        expanded_count=0,
+        activity_budget=activity_budget,
+        cost_seconds=time.time() - node_started,
     )
     store.add_finding(
         conn, chosen_seed.text + " :: " + result.body_md[:200], brief_emb
@@ -645,6 +801,43 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     if na <= 0 or nb <= 0:
         return 0.0
     return float(np.dot(a, b) / (na * nb))
+
+
+def _code_timeout(code_budget: str) -> float:
+    """Execution timeout by code budget."""
+    if code_budget == "large":
+        return 120.0
+    if code_budget == "medium":
+        return 90.0
+    return 30.0
+
+
+def _prune_frontier_to_beam(conn, frontier: tree.Frontier, run_id: str, beam_width: int) -> int:
+    """Keep only the top beam_width open leaves for the current run."""
+    if beam_width <= 0:
+        return 0
+    open_ids = frontier.all_open()
+    if len(open_ids) <= beam_width:
+        return 0
+    nodes = []
+    for nid in open_ids:
+        n = store.get_journal(conn, nid)
+        if not n or n.get("run_id") != run_id or n.get("status") != "open":
+            continue
+        score = n.get("subtree_score")
+        if score is None:
+            score = n.get("dopamine_total") or 0.0
+        nodes.append((float(score), int(nid)))
+    nodes.sort(reverse=True)
+    keep = {nid for _, nid in nodes[:beam_width]}
+    pruned = 0
+    for _, nid in nodes[beam_width:]:
+        if nid in keep:
+            continue
+        store.update_journal_status(conn, nid, "pruned")
+        frontier.discard(nid)
+        pruned += 1
+    return pruned
 
 
 if __name__ == "__main__":

@@ -55,6 +55,7 @@ class ActivityContext:
     verbose: bool = False
     timeout_s: float = 30.0
     artifact_root: Path = Path("data/artifacts")
+    code_budget: str = "small"
 
 
 @runtime_checkable
@@ -128,16 +129,27 @@ _CLUSTER_BOOSTS: dict[str, list[str]] = {
     "app_idea": ["app", "product", "tool", "ux", "ui"],
 }
 
+_VISUAL_CUES = [
+    "visual", "art", "artist", "painting", "drawing", "design", "photo", "image",
+    "illustration", "media", "cinema", "film", "diagram", "simulation", "geometry",
+    "map", "network", "graph", "architecture", "spatial", "color", "ui", "interface",
+]
+
+_AUDIO_CUES = [
+    "music", "musical", "audio", "sound", "song", "rhythm", "tempo", "speech",
+    "voice", "sonic", "instrument", "jazz", "album", "listening", "podcast",
+]
+
 
 def _boosted_weights(
     base: dict[str, int],
     cluster_label: str,
     *,
     boost: int = 2,
-) -> dict[str, int]:
+) -> dict[str, float]:
     """Apply a small additive boost to activities whose keywords match the cluster label."""
     label = (cluster_label or "").lower()
-    out = dict(base)
+    out: dict[str, float] = {k: float(v) for k, v in base.items()}
     for activity_name, kws in _CLUSTER_BOOSTS.items():
         if activity_name not in out:
             continue
@@ -146,21 +158,52 @@ def _boosted_weights(
     return out
 
 
+def modality_weight_factor(
+    activity_name: str,
+    *,
+    seed_text: str = "",
+    cluster_label: str = "",
+    forced_only: bool = False,
+) -> float:
+    """Return a heuristic multiplier for media activities.
+
+    Image/music riffs are expensive and often silly on abstract topics. Keep them in the
+    pool when explicitly requested, but strongly downweight them unless the seed or
+    cluster text suggests that visual/audio form will explain the idea well.
+    """
+    if activity_name not in {"image_riff", "music_riff"}:
+        return 1.0
+    if forced_only:
+        return 1.0
+    text = f"{seed_text} {cluster_label}".lower()
+    cues = _VISUAL_CUES if activity_name == "image_riff" else _AUDIO_CUES
+    return 1.0 if any(cue in text for cue in cues) else 0.08
+
+
 def pick_activity(
     mix: dict[str, int],
     ctx: ActivityContext,
     rng: random.Random,
     cluster_label: str = "",
+    seed_text: str = "",
 ) -> Optional["Activity"]:
     """Sample an activity, weighted by `mix`, restricted to available ones.
 
     Falls back to the highest-weighted *available* activity if the random pick chose an
     unavailable one (e.g. the user listed `image_riff` but has no image API key set).
     """
-    weights = _boosted_weights(mix, cluster_label) if cluster_label else dict(mix)
-    candidates: list[tuple[str, int]] = []
+    weights = _boosted_weights(mix, cluster_label) if cluster_label else {k: float(v) for k, v in mix.items()}
+    positive = [name for name, w in mix.items() if w > 0]
+    forced_only = len(positive) == 1 and positive[0] in {"image_riff", "music_riff"}
+    candidates: list[tuple[str, float]] = []
     for name, w in weights.items():
-        if w <= 0:
+        weight = float(w) * modality_weight_factor(
+            name,
+            seed_text=seed_text,
+            cluster_label=cluster_label,
+            forced_only=forced_only,
+        )
+        if weight <= 0:
             continue
         a = _REGISTRY.get(name)
         if not a:
@@ -170,7 +213,7 @@ def pick_activity(
                 continue
         except Exception:
             continue
-        candidates.append((name, w))
+        candidates.append((name, weight))
     if not candidates:
         # Last-resort fallback: research must always be available (no keys, no extras).
         return _REGISTRY.get("research")
@@ -207,6 +250,7 @@ def _register_all() -> None:
         "image_riff",
         "music_riff",
         "video_riff",
+        "web_app_sketch",
         "mood_journal",
     ]:
         try:

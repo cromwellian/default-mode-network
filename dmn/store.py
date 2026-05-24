@@ -38,7 +38,23 @@ CREATE TABLE IF NOT EXISTS journal (
     dopamine_breakdown TEXT,
     path TEXT NOT NULL,
     embedding TEXT,
-    created_at REAL NOT NULL
+    created_at REAL NOT NULL,
+    run_id TEXT,
+    visit_count INTEGER DEFAULT 0,
+    expanded_count INTEGER DEFAULT 0,
+    last_improvement REAL,
+    activity_budget TEXT,
+    cost_seconds REAL
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+    id TEXT PRIMARY KEY,
+    started_at REAL,
+    finished_at REAL,
+    command TEXT,
+    notes TEXT,
+    best_score REAL,
+    brief_count INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS recent_findings (
@@ -64,7 +80,7 @@ def _vec_from_json(s: Optional[str]) -> Optional[np.ndarray]:
     return np.asarray(json.loads(s), dtype=np.float32)
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -75,6 +91,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     v4: journal entity-tagging columns (entities, rabbit_holes — both JSON TEXT)
     v5: journal activity columns (activity, artifact_paths, execution_result)
     v6: HDBSCAN medoids, cluster_method, is_noise, interests.last_seen
+    v7: run/session identity + journal metrics
     """
     for sql in [
         # v2
@@ -98,12 +115,24 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "ALTER TABLE clusters ADD COLUMN cluster_method TEXT",
         "ALTER TABLE clusters ADD COLUMN is_noise INTEGER DEFAULT 0",
         "ALTER TABLE interests ADD COLUMN last_seen REAL",
+        # v7 — run/session identity and journal metrics
+        "ALTER TABLE journal ADD COLUMN run_id TEXT",
+        "ALTER TABLE journal ADD COLUMN visit_count INTEGER DEFAULT 0",
+        "ALTER TABLE journal ADD COLUMN expanded_count INTEGER DEFAULT 0",
+        "ALTER TABLE journal ADD COLUMN last_improvement REAL",
+        "ALTER TABLE journal ADD COLUMN activity_budget TEXT",
+        "ALTER TABLE journal ADD COLUMN cost_seconds REAL",
     ]:
         try:
             conn.execute(sql)
         except sqlite3.OperationalError:
             pass
     conn.execute("CREATE TABLE IF NOT EXISTS schema_version (v INTEGER PRIMARY KEY)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS runs ("
+        "id TEXT PRIMARY KEY, started_at REAL, finished_at REAL, command TEXT, "
+        "notes TEXT, best_score REAL, brief_count INTEGER)"
+    )
     conn.execute("INSERT OR IGNORE INTO schema_version(v) VALUES (?)", (SCHEMA_VERSION,))
     conn.commit()
 
@@ -282,7 +311,8 @@ def update_cluster_label(
 _JOURNAL_COLUMNS = (
     "id, seed, seed_source, tools, dopamine_total, dopamine_breakdown, "
     "path, embedding, created_at, parent_id, mutation, depth, status, "
-    "subtree_score, entities, rabbit_holes, activity, artifact_paths, execution_result"
+    "subtree_score, entities, rabbit_holes, activity, artifact_paths, execution_result, "
+    "run_id, visit_count, expanded_count, last_improvement, activity_budget, cost_seconds"
 )
 
 
@@ -308,6 +338,12 @@ def _row_to_journal(row: tuple) -> dict:
         "activity": row[16],
         "artifact_paths": json.loads(row[17]) if row[17] else [],
         "execution_result": json.loads(row[18]) if row[18] else None,
+        "run_id": row[19],
+        "visit_count": int(row[20] or 0),
+        "expanded_count": int(row[21] or 0),
+        "last_improvement": row[22],
+        "activity_budget": row[23],
+        "cost_seconds": row[24],
     }
 
 
@@ -328,6 +364,12 @@ def add_journal(
     activity: Optional[str] = None,
     artifact_paths: Optional[list] = None,
     execution_result: Optional[dict] = None,
+    run_id: Optional[str] = None,
+    visit_count: int = 0,
+    expanded_count: int = 0,
+    last_improvement: Optional[float] = None,
+    activity_budget: Optional[str] = None,
+    cost_seconds: Optional[float] = None,
 ) -> int:
     """Record a brief in the journal index; returns its row id.
 
@@ -350,8 +392,9 @@ def add_journal(
         "INSERT INTO journal(seed, seed_source, tools, dopamine_total, "
         "dopamine_breakdown, path, embedding, created_at, "
         "parent_id, mutation, depth, status, subtree_score, entities, rabbit_holes, "
-        "activity, artifact_paths, execution_result) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "activity, artifact_paths, execution_result, run_id, visit_count, expanded_count, "
+        "last_improvement, activity_budget, cost_seconds) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             seed,
             seed_source,
@@ -371,10 +414,72 @@ def add_journal(
             activity,
             artifact_paths_json,
             execution_json,
+            run_id,
+            int(visit_count),
+            int(expanded_count),
+            last_improvement,
+            activity_budget,
+            cost_seconds,
         ),
     )
     conn.commit()
     return cur.lastrowid
+
+
+def start_run(conn: sqlite3.Connection, run_id: str, command: str = "", notes: str = "") -> None:
+    """Create or refresh a run row for a wander/explore invocation."""
+    conn.execute(
+        "INSERT OR REPLACE INTO runs(id, started_at, finished_at, command, notes, best_score, brief_count) "
+        "VALUES (?, ?, NULL, ?, ?, NULL, 0)",
+        (run_id, time.time(), command, notes),
+    )
+    conn.commit()
+
+
+def finish_run(
+    conn: sqlite3.Connection,
+    run_id: str,
+    *,
+    best_score: Optional[float] = None,
+    brief_count: int = 0,
+    notes: str = "",
+) -> None:
+    """Mark a run complete and store summary metrics."""
+    conn.execute(
+        "UPDATE runs SET finished_at = ?, best_score = ?, brief_count = ?, "
+        "notes = COALESCE(NULLIF(?, ''), notes) WHERE id = ?",
+        (time.time(), best_score, int(brief_count), notes, run_id),
+    )
+    conn.commit()
+
+
+def increment_journal_visit(conn: sqlite3.Connection, journal_id: int) -> None:
+    """Increment visit_count for a journal node when it is selected from the frontier."""
+    conn.execute(
+        "UPDATE journal SET visit_count = COALESCE(visit_count, 0) + 1 WHERE id = ?",
+        (journal_id,),
+    )
+    conn.commit()
+
+
+def increment_journal_expanded(conn: sqlite3.Connection, journal_id: int) -> None:
+    """Increment expanded_count for a journal node after child expansion is attempted."""
+    conn.execute(
+        "UPDATE journal SET expanded_count = COALESCE(expanded_count, 0) + 1 WHERE id = ?",
+        (journal_id,),
+    )
+    conn.commit()
+
+
+def update_journal_last_improvement(
+    conn: sqlite3.Connection, journal_id: int, improvement: float
+) -> None:
+    """Record the score delta observed when this journal node was created."""
+    conn.execute(
+        "UPDATE journal SET last_improvement = ? WHERE id = ?",
+        (float(improvement), journal_id),
+    )
+    conn.commit()
 
 
 def list_journal_by_activity(
@@ -385,6 +490,18 @@ def list_journal_by_activity(
         f"SELECT {_JOURNAL_COLUMNS} FROM journal WHERE activity = ? "
         "ORDER BY created_at DESC LIMIT ?",
         (name, limit),
+    ).fetchall()
+    return [_row_to_journal(r) for r in rows]
+
+
+def list_journal_by_run(
+    conn: sqlite3.Connection, run_id: str, limit: int = 1000
+) -> list[dict]:
+    """Return journal entries for one run, newest first."""
+    rows = conn.execute(
+        f"SELECT {_JOURNAL_COLUMNS} FROM journal WHERE run_id = ? "
+        "ORDER BY created_at DESC LIMIT ?",
+        (run_id, limit),
     ).fetchall()
     return [_row_to_journal(r) for r in rows]
 

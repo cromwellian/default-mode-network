@@ -21,16 +21,28 @@ from dmn.generators import Artifact
 from dmn.sandbox import run_python
 from dmn.seeds import Seed
 
-SYSTEM = (
-    "You write tiny, self-contained Python sketches that explore an idea. "
-    "Stdlib + numpy only. No external files, no CLI args, no network. "
-    "≤100 lines. Must include `if __name__ == \"__main__\":` and print something "
-    "useful in under 30 seconds on a CPU."
-)
+def _system_for_budget(code_budget: str) -> str:
+    budget = (code_budget or "small").lower()
+    if budget == "large":
+        size = (
+            "Up to ~350 lines is fine, with several functions or small classes. "
+            "Keep it in one file unless a tiny helper module is truly clearer."
+        )
+    elif budget == "medium":
+        size = "Up to ~250 lines is fine, with multiple functions if useful."
+    else:
+        size = "≤100 lines."
+    return (
+        "You write self-contained Python sketches that explore an idea. "
+        "Stdlib + numpy only. No external files unless explicitly asked, no CLI args, "
+        "no network. "
+        f"{size} Must include `if __name__ == \"__main__\":` and print something "
+        "useful on a CPU."
+    )
 
 USER_TEMPLATE = (
     "Seed: {seed_text}\n\n"
-    "Write a small Python sketch (≤100 lines, stdlib + numpy only) that explores this. "
+    "Write a Python sketch ({budget_note}, stdlib + numpy only) that explores this. "
     "Be concrete and runnable. Output two fenced blocks in this order:\n\n"
     "1. ```python\n# the program\n```\n"
     "2. ```json\n{{\"what_it_does\": \"...\", \"novelty\": \"...\", \"limitations\": \"...\"}}\n```\n\n"
@@ -115,10 +127,15 @@ class CodeSketchActivity:
     ) -> tuple[str, dict, str]:
         """Ask the LLM for code + JSON meta + commentary; fall back to a canned sketch."""
         try:
+            max_tokens = 3500 if ctx.code_budget == "medium" else 5000 if ctx.code_budget == "large" else 2000
+            budget_note = {
+                "medium": "up to about 250 lines",
+                "large": "up to about 350 lines, with simple multi-function structure",
+            }.get(ctx.code_budget, "≤100 lines")
             resp = ctx.llm.complete(
-                system=SYSTEM,
-                user=USER_TEMPLATE.format(seed_text=seed.text),
-                max_tokens=2000,
+                system=_system_for_budget(ctx.code_budget),
+                user=USER_TEMPLATE.format(seed_text=seed.text, budget_note=budget_note),
+                max_tokens=max_tokens,
             )
             text = (resp.text or "").strip()
         except Exception:

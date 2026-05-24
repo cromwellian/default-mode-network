@@ -119,11 +119,11 @@ def cluster_sample(clusters: list[dict], llm, rng: random.Random) -> Seed:
 
 
 def cross_pollinate(clusters: list[dict], llm, rng: random.Random) -> Seed:
-    """Pick the two MOST DISTANT clusters by min cosine sim; brainstorm at the intersection."""
+    """Pick two moderately distant clusters; brainstorm at the intersection."""
     eligible = [c for c in _eligible_clusters(clusters, rng) if not c.get("is_noise")]
     if len(eligible) < 2:
         return cluster_sample(clusters, llm, rng)
-    a, b = _most_distant_pair(eligible, rng)
+    a, b = _moderate_distance_pair(eligible, rng)
     la, lb = _theme(a), _theme(b)
     sa = rng.choice(_subtopics(a)) if _subtopics(a) else ""
     sb = rng.choice(_subtopics(b)) if _subtopics(b) else ""
@@ -147,6 +147,44 @@ def cross_pollinate(clusters: list[dict], llm, rng: random.Random) -> Seed:
         else f"How do '{la}' and '{lb}' speak to each other?"
     )
     return Seed(text=text, source="cross", subtopic=(sa or sb) or None)
+
+
+def _moderate_distance_pair(
+    clusters: list[dict],
+    rng: random.Random,
+    low_q: float = 0.40,
+    high_q: float = 0.75,
+) -> tuple[dict, dict]:
+    """Return a pair from a middle distance band, falling back to far/random.
+
+    Pure "most distant" pairs were often too alien to produce a useful seed. The
+    moderate band keeps enough tension for cross-pollination without forcing unrelated
+    clusters together.
+    """
+    import numpy as np
+
+    valid = [c for c in clusters if c.get("centroid") is not None]
+    if len(valid) < 2:
+        return tuple(rng.sample(clusters, 2))  # type: ignore[return-value]
+    cents = [np.asarray(c["centroid"], dtype=np.float32) for c in valid]
+    norms = [c / (np.linalg.norm(c) + 1e-8) for c in cents]
+    pairs: list[tuple[float, int, int]] = []
+    for i in range(len(norms)):
+        for j in range(i + 1, len(norms)):
+            sim = float(np.dot(norms[i], norms[j]))
+            distance = 1.0 - sim
+            pairs.append((distance, i, j))
+    if not pairs:
+        return tuple(rng.sample(clusters, 2))  # type: ignore[return-value]
+
+    distances = np.asarray([p[0] for p in pairs], dtype=np.float32)
+    lo = float(np.quantile(distances, low_q))
+    hi = float(np.quantile(distances, high_q))
+    band = [p for p in pairs if lo <= p[0] <= hi]
+    if not band:
+        return _most_distant_pair(valid, rng)
+    _, i, j = rng.choice(band)
+    return valid[i], valid[j]
 
 
 def _most_distant_pair(

@@ -108,6 +108,11 @@ def main(
         "--modalities",
         help="CSV of modalities to enable when --generate is set.",
     ),
+    code_budget: str = typer.Option(
+        "small",
+        "--code-budget",
+        help="Budget for code-generating activities: small | medium | large.",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Run a wandering-mind research session and write briefs to journal/."""
@@ -127,6 +132,10 @@ def main(
     if execute and sandbox_mode == "none":
         console.print("[yellow]--execute requested but --sandbox none; ignoring --execute[/]")
         execute = False
+    code_budget = code_budget.lower().strip()
+    if code_budget not in {"small", "medium", "large"}:
+        console.print("[yellow]unknown --code-budget; using small[/]")
+        code_budget = "small"
     mix = (
         acts.parse_mix(activity_mix)
         if activity_mix
@@ -163,6 +172,8 @@ def main(
         execute=execute,
         sandbox=sandbox_mode,
         verbose=verbose,
+        timeout_s=_code_timeout(code_budget),
+        code_budget=code_budget,
     )
 
     deadline = time.time() + minutes * 60 if minutes else None
@@ -182,7 +193,9 @@ def main(
             )
 
         cluster_label = _nearest_cluster_label(clusters, centroids, chosen_seed.text)
-        activity = acts.pick_activity(mix, ctx, rng, cluster_label=cluster_label)
+        activity = acts.pick_activity(
+            mix, ctx, rng, cluster_label=cluster_label, seed_text=chosen_seed.text
+        )
         if activity is None:
             console.print("[red]  no activity available; aborting[/]")
             break
@@ -387,6 +400,14 @@ def _artifact_to_dict(artifact) -> dict:
         "seconds": artifact.seconds,
         "meta": artifact.meta,
     }
+
+
+def _code_timeout(code_budget: str) -> float:
+    if code_budget == "large":
+        return 120.0
+    if code_budget == "medium":
+        return 90.0
+    return 30.0
 
 
 if __name__ == "__main__":

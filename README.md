@@ -44,6 +44,36 @@ Inspect clusters (medoid text, method, noise flag, silhouette):
 uv run scripts/inspect_clusters.py --top 10
 ```
 
+## Wander controls and web apps (v0.5)
+
+Tree-mode wander now records a `run_id` for each invocation, stores per-node visit /
+expansion metrics in SQLite, and keeps `journal/tree.html` focused on the latest run when
+session data is available. You can bound the live frontier with beam pruning and stop when
+new expansions stop improving dopamine:
+
+```bash
+uv run wander.py \
+  --root-count 8 \
+  --max-depth 5 \
+  --beam-width 4 \
+  --patience 6 \
+  --min-improvement 0.01 \
+  --activity-mix 'research:4,code_sketch:2,web_app_sketch:2,app_idea:1,algorithm_explore:1' \
+  --code-budget medium \
+  --execute
+```
+
+Cross-pollination now samples cluster pairs from a moderate distance band instead of always
+forcing the farthest pair, which tends to produce seeds with more useful overlap. Image and
+music riffs are strongly downweighted unless the seed or cluster text suggests visual/audio
+form would help explain the concept, or you explicitly request only that activity.
+
+`web_app_sketch` is a new opt-in activity that writes a self-contained
+`data/artifacts/web_app_sketch/<slug>/index.html` plus `manifest.json`. Generated journal
+briefs link to the app and embed it in a sandboxed iframe. Code activities accept
+`--code-budget small|medium|large`; `medium` allows larger multi-function sketches and a
+longer sandbox timeout, while `large` allows larger simple artifacts up to a 120s timeout.
+
 ## Upgrading from earlier dev versions
 
 If you ran v0.1.0 / v0.1.1 against your real browser history, your existing SQLite carries the noisy rows and URL-flavored cluster labels. One-shot fix:

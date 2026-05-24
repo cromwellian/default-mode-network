@@ -35,6 +35,12 @@ def write_brief(
     execution: dict | None = None,
     fulfillment: float | None = None,
     fulfillment_breakdown: dict | None = None,
+    run_id: str | None = None,
+    visit_count: int | None = None,
+    expanded_count: int | None = None,
+    last_improvement: float | None = None,
+    activity_budget: str | None = None,
+    cost_seconds: float | None = None,
     journal_dir: Path | str = JOURNAL_DIR,
 ) -> Path:
     """Write a markdown brief file with YAML frontmatter; returns the new path.
@@ -79,6 +85,18 @@ def write_brief(
         fm_parts.append(f"status: {status}")
     if activity is not None:
         fm_parts.append(f"activity: {activity}")
+    if run_id is not None:
+        fm_parts.append(f"run_id: {json.dumps(run_id)}")
+    if visit_count is not None:
+        fm_parts.append(f"visit_count: {int(visit_count)}")
+    if expanded_count is not None:
+        fm_parts.append(f"expanded_count: {int(expanded_count)}")
+    if last_improvement is not None:
+        fm_parts.append(f"last_improvement: {float(last_improvement):.6f}")
+    if activity_budget is not None:
+        fm_parts.append(f"activity_budget: {json.dumps(activity_budget)}")
+    if cost_seconds is not None:
+        fm_parts.append(f"cost_seconds: {float(cost_seconds):.3f}")
     if artifact:
         fm_parts.append(f"artifact: {json.dumps(artifact)}")
     if artifacts:
@@ -128,6 +146,11 @@ def _render_artifact_md(artifact: dict, brief_path: Path) -> str:
         )
     if modality == "video":
         return f"[Watch]({target})"
+    if modality == "html":
+        return (
+            f"[Open web app]({target})\n\n"
+            f'<iframe src="{target}" sandbox="allow-scripts" loading="lazy"></iframe>'
+        )
     return f"[Artifact]({target})"
 
 
