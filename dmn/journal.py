@@ -33,6 +33,8 @@ def write_brief(
     activity: str | None = None,
     artifacts: list[dict] | None = None,
     execution: dict | None = None,
+    fulfillment: float | None = None,
+    fulfillment_breakdown: dict | None = None,
     journal_dir: Path | str = JOURNAL_DIR,
 ) -> Path:
     """Write a markdown brief file with YAML frontmatter; returns the new path.
@@ -85,6 +87,10 @@ def write_brief(
     if execution is not None:
         # full sandbox result; useful for downstream tooling
         fm_parts.append(f"execution: {json.dumps(execution)}")
+    if fulfillment is not None:
+        fm_parts.append(f"fulfillment: {float(fulfillment):.4f}")
+    if fulfillment_breakdown is not None:
+        fm_parts.append(f"fulfillment_breakdown: {json.dumps(fulfillment_breakdown)}")
     fm_parts.extend(["---", "", ""])
     fm = "\n".join(fm_parts)
     body_text = (body or "").rstrip()

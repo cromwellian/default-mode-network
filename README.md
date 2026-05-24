@@ -243,8 +243,9 @@ A copy of the skill also lives at `.claude/skills/default-mode-network/SKILL.md`
   - `alignment` = max cosine similarity to your taste cluster centroids. Stuff you'd like.
   - `novelty` = `1 − max cosine similarity` to recent journal entries. Stuff you haven't seen.
   - `surprise` = how much more aligned to your taste than to your recent finds. *New angles* on the things you love.
-  - `serendipity` = epsilon-greedy override: small chance to pursue a low-alignment, high-novelty item. Keeps your taste horizons drifting.
-  - `total = α·alignment + β·novelty + γ·surprise + ε·serendipity`. Constants live at the top of `dmn/taste.py` — tune them.
+  - `serendipity` = epsilon-greedy override: small chance to pursue a low-alignment, high-novelty item. Keeps your taste horizons drifting. Only fires when `fulfillment` meets a minimum floor — failed searches can't jackpot here.
+  - `fulfillment` = did the research/tools actually return useful material? Count + quality of tool hits, relevance cap when mean alignment is low, and a penalty when the LLM admits the search whiffed. Non-research activities default to 1.0.
+  - `total = α·alignment + β·novelty + γ·surprise + δ·fulfillment + ε·serendipity`. Constants live at the top of `dmn/taste.py` — tune them.
 - **Multiple taste clusters, not a centroid.** Your interests are a polytopia. K-means over your interest embeddings preserves "I like Lisp AND fermentation AND polyrhythms", and the seed generator can sample one cluster *or* two distant ones (cross-pollination).
 - **Online learning.** High-dopamine briefs nudge the nearest cluster centroid by a small step. Your taste profile drifts as you read.
 - **Minimal stack.** SQLite + JSON-blob vectors + a tiny in-memory numpy index. No vector DB, no Postgres, no Docker. You can `cat` the database and read your own profile.
@@ -320,7 +321,7 @@ pyproject.toml
 
 ## Knobs you'll want to turn
 
-- `dmn/taste.py` — the dopamine constants (`ALPHA`, `BETA`, `GAMMA`, `EPS`). Crank `EPS` up to widen your horizons; crank it down to drill in.
+- `dmn/taste.py` — the dopamine constants (`ALPHA`, `BETA`, `GAMMA`, `DELTA`, `EPS`, `SERENDIPITY_MIN_FULFILLMENT`). Crank `EPS` up to widen your horizons; crank it down to drill in. Raise `DELTA` to reward briefs backed by solid tool hits.
 - `dmn/seeds.py` — the mix of seed strategies. The default `explore.py` samples them with fixed probabilities; tune those.
 - `explore.py` — *everything*. This is your editable file. Try a different planner, a different scorer, a different synthesis prompt. Log a one-line rationale at the top of the file every time you change it.
 - `DMN_LLM_PROVIDER` env var: `anthropic` (default if `ANTHROPIC_API_KEY` set), `openai`, or `stub`.

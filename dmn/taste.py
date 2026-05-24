@@ -9,10 +9,14 @@ from typing import Optional, Sequence
 import numpy as np
 
 # --- Dopamine reward weights (these are the knobs you'll want to tune) ---
-ALPHA = 0.55  # alignment with taste clusters
-BETA = 0.25   # novelty (1 - max sim to recent findings)
-GAMMA = 0.15  # surprise (taste-aligned but new angle)
+ALPHA = 0.50  # alignment with taste clusters
+BETA = 0.22   # novelty (1 - max sim to recent findings)
+GAMMA = 0.13  # surprise (taste-aligned but new angle)
+DELTA = 0.20  # fulfillment — did research/tools return useful material?
 EPS = 0.05    # serendipity epsilon-greedy probability + bonus weight
+
+# Serendipity bonus only applies when fulfillment meets this floor.
+SERENDIPITY_MIN_FULFILLMENT = 0.35
 
 MIN_CLUSTERS = 4
 DEFAULT_K = 8
@@ -418,21 +422,31 @@ def dopamine(
     centroids: Sequence[np.ndarray],
     recent: Sequence[np.ndarray],
     rng: Optional[random.Random] = None,
+    *,
+    fulfillment: float = 1.0,
 ) -> dict:
     """Compute the dopamine reward as a dict with breakdown + total. Logged with every brief."""
     rng = rng or random.Random()
+    f = max(0.0, min(1.0, float(fulfillment)))
     a = alignment(item_emb, centroids)
     n = novelty(item_emb, recent)
     s = surprise(item_emb, recent, centroids)
     serendipity = 0.0
-    # Epsilon-greedy: small chance to amplify a low-alignment, high-novelty item
-    if rng.random() < EPS and a < 0.4 and n > 0.6:
+    # Epsilon-greedy: small chance to amplify a low-alignment, high-novelty item.
+    # Gated on fulfillment so failed searches can't jackpot via serendipity alone.
+    if (
+        f >= SERENDIPITY_MIN_FULFILLMENT
+        and rng.random() < EPS
+        and a < 0.4
+        and n > 0.6
+    ):
         serendipity = 1.0
-    total = ALPHA * a + BETA * n + GAMMA * s + EPS * serendipity
+    total = ALPHA * a + BETA * n + GAMMA * s + DELTA * f + EPS * serendipity
     return {
         "alignment": round(float(a), 4),
         "novelty": round(float(n), 4),
         "surprise": round(float(s), 4),
+        "fulfillment": round(float(f), 4),
         "serendipity": round(float(serendipity), 4),
         "total": round(float(total), 4),
     }

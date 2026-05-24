@@ -203,14 +203,22 @@ def main(
             continue
 
         if not (result.body_md or "").strip():
-            console.print("[yellow]  (empty body, skipping)[/]")
-            n_done += 1
+            reason = result.metadata.get("reason", "empty body")
+            if result.metadata.get("skipped"):
+                console.print(f"[yellow]  research skipped ({reason})[/]")
+            else:
+                console.print("[yellow]  (empty body, skipping)[/]")
+            if not result.metadata.get("skipped"):
+                n_done += 1
             continue
 
         # Score the brief itself for dopamine + persistence.
         embedding_text = result.embedding_text or chosen_seed.text
         brief_emb = emb.embed([embedding_text[:1500]])[0]
-        d_brief = taste.dopamine(brief_emb, centroids, recent_embs, rng)
+        fulfillment = float(result.metadata.get("fulfillment", 1.0))
+        d_brief = taste.dopamine(
+            brief_emb, centroids, recent_embs, rng, fulfillment=fulfillment
+        )
 
         # Pre-v0.3 image/music/video legacy path; off unless --generate is set.
         artifact_meta: Optional[dict] = None
@@ -232,6 +240,8 @@ def main(
             activity=activity.name,
             artifacts=artifacts_dicts or None,
             execution=result.execution,
+            fulfillment=result.metadata.get("fulfillment"),
+            fulfillment_breakdown=result.metadata.get("fulfillment_breakdown"),
         )
         store.add_journal(
             conn,

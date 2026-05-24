@@ -488,12 +488,19 @@ def _expand_brief(
         return None, 0.0, None
 
     if not (result.body_md or "").strip():
-        console.print("[yellow]  (empty body, skipping)[/]")
+        reason = result.metadata.get("reason", "empty body")
+        if result.metadata.get("skipped"):
+            console.print(f"[yellow]  research skipped ({reason})[/]")
+        else:
+            console.print("[yellow]  (empty body, skipping)[/]")
         return None, 0.0, None
 
     embedding_text = result.embedding_text or chosen_seed.text
     brief_emb = ctx.embed_fn([embedding_text[:1500]])[0]
-    d_brief = taste.dopamine(brief_emb, centroids, recent_embs, rng)
+    fulfillment = float(result.metadata.get("fulfillment", 1.0))
+    d_brief = taste.dopamine(
+        brief_emb, centroids, recent_embs, rng, fulfillment=fulfillment
+    )
 
     artifact_meta: Optional[dict] = None
     if generate and activity.name == "research":
@@ -518,6 +525,8 @@ def _expand_brief(
         activity=activity.name,
         artifacts=artifacts_dicts or None,
         execution=result.execution,
+        fulfillment=result.metadata.get("fulfillment"),
+        fulfillment_breakdown=result.metadata.get("fulfillment_breakdown"),
     )
     node_id = store.add_journal(
         conn,
