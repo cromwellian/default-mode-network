@@ -74,6 +74,11 @@ def import_(
         f"[green]Imported[/] {result['interests_loaded']} interests, "
         f"{result['clusters_loaded']} clusters from {path}."
     )
+    if append:
+        console.print(
+            "[yellow]Profile marked stale; rebuild clusters with `uv run prepare.py` "
+            "or refresh labels with `uv run prepare.py --relabel-only`.[/]"
+        )
 
 
 @app.command()
@@ -110,6 +115,10 @@ def merge(
     console.print(
         f"[green]Wrote unioned profile[/] ({merged['meta']['interest_count']} interests, "
         f"{merged['meta']['cluster_count']} clusters) -> {out_path}"
+    )
+    console.print(
+        "[yellow]Merged clusters are not coherent until the merged profile is imported "
+        "and reclustered with `uv run prepare.py`.[/]"
     )
 
 

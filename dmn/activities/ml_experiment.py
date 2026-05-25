@@ -21,8 +21,8 @@ from dmn.grounding import (
     gather_grounding,
     grounding_block,
     grounding_footer,
-    grounding_fulfillment,
 )
+from dmn.fulfillment import compute_activity_fulfillment
 from dmn.sandbox import run_python
 from dmn.seeds import Seed
 
@@ -82,15 +82,23 @@ class MlExperimentActivity:
             tail = text.rsplit("```", 1)[-1].strip()
             commentary = tail if 0 < len(tail) < 800 else ""
         if not code:
+            body = (
+                f"## ML experiment\n\n"
+                f"**Seed:** {seed.text}\n\n"
+                "_(no LLM available; ml_experiment skipped)_\n"
+            )
+            fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+                activity=self.name, body_md=body, skipped=True
+            )
             return ActivityResult(
                 title=f"ML experiment (skipped): {seed.text[:60]}",
-                body_md=(
-                    f"## ML experiment\n\n"
-                    f"**Seed:** {seed.text}\n\n"
-                    "_(no LLM available; ml_experiment skipped)_\n"
-                ),
+                body_md=body,
                 embedding_text=seed.text,
-                metadata={"skipped": True},
+                metadata={
+                    "skipped": True,
+                    "fulfillment": fulfillment,
+                    "fulfillment_breakdown": fulfillment_breakdown,
+                },
             )
         path = out_dir / "experiment.py"
         path.write_text(code + "\n")
@@ -150,9 +158,17 @@ class MlExperimentActivity:
         if commentary:
             body_lines.extend(["", "### Commentary", "", commentary])
 
+        body = "\n".join(body_lines) + grounding_footer(refs)
+        fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+            activity=self.name,
+            body_md=body,
+            artifacts=artifacts,
+            grounding_items=refs,
+            execution=execution,
+        )
         return ActivityResult(
             title=meta.get("hypothesis") or f"ML experiment: {seed.text[:60]}",
-            body_md="\n".join(body_lines) + grounding_footer(refs),
+            body_md=body,
             artifacts=artifacts,
             embedding_text=seed.text + " :: " + (meta.get("hypothesis") or "")[:300],
             metadata={
@@ -161,7 +177,8 @@ class MlExperimentActivity:
                 "expected_range": meta.get("expected_range"),
                 "torch_present": torch_present,
                 "lines": len(code.splitlines()),
-                "fulfillment": grounding_fulfillment(refs),
+                "fulfillment": fulfillment,
+                "fulfillment_breakdown": fulfillment_breakdown,
                 "grounding": [
                     {"title": r.title, "url": r.url, "source": r.source} for r in refs
                 ],

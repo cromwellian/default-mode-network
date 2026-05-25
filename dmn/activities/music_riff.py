@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dmn import generators as gens
 from dmn.activities import ActivityContext, ActivityResult, register
+from dmn.fulfillment import compute_activity_fulfillment
 from dmn.journal import JOURNAL_DIR
 from dmn.paths import artifact_href_for_journal
 from dmn.seeds import Seed
@@ -37,14 +38,22 @@ class MusicRiffActivity:
         music_prompt = self._make_prompt(seed, ctx)
         backend = self._pick_backend(ctx)
         if backend is None:
+            body = (
+                f"## Music riff\n\n**Seed:** {seed.text}\n\n"
+                "_(no music backend available)_"
+            )
+            fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+                activity=self.name, body_md=body, skipped=True
+            )
             return ActivityResult(
                 title=f"Music (skipped): {seed.text[:60]}",
-                body_md=(
-                    f"## Music riff\n\n**Seed:** {seed.text}\n\n"
-                    "_(no music backend available)_"
-                ),
+                body_md=body,
                 embedding_text=seed.text,
-                metadata={"skipped": True},
+                metadata={
+                    "skipped": True,
+                    "fulfillment": fulfillment,
+                    "fulfillment_breakdown": fulfillment_breakdown,
+                },
             )
         artifact = None
         errors: list[str] = []
@@ -56,22 +65,41 @@ class MusicRiffActivity:
                 errors.append(f"{backend.name}: {e}")
         if artifact is None:
             err = "; ".join(errors) if errors else "no music backend available"
+            body = (
+                f"## Music riff\n\n**Seed:** {seed.text}\n\n"
+                f"_(all generators failed: {err})_"
+            )
+            fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+                activity=self.name, body_md=body, skipped=True
+            )
             return ActivityResult(
                 title=f"Music (failed): {seed.text[:60]}",
-                body_md=(
-                    f"## Music riff\n\n**Seed:** {seed.text}\n\n"
-                    f"_(all generators failed: {err})_"
-                ),
+                body_md=body,
                 embedding_text=seed.text,
-                metadata={"error": err, "generator": backend.name if backend else None},
+                metadata={
+                    "error": err,
+                    "generator": backend.name if backend else None,
+                    "fulfillment": fulfillment,
+                    "fulfillment_breakdown": fulfillment_breakdown,
+                },
             )
         body = self._render_body(seed, music_prompt, artifact, artifact.generator)
+        fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+            activity=self.name,
+            body_md=body,
+            artifacts=[artifact],
+        )
         return ActivityResult(
             title=f"Music: {seed.text[:60]}",
             body_md=body,
             artifacts=[artifact],
             embedding_text=seed.text + " :: " + music_prompt[:300],
-            metadata={"generator": artifact.generator, "music_prompt": music_prompt},
+            metadata={
+                "generator": artifact.generator,
+                "music_prompt": music_prompt,
+                "fulfillment": fulfillment,
+                "fulfillment_breakdown": fulfillment_breakdown,
+            },
         )
 
     def _make_prompt(self, seed: Seed, ctx: ActivityContext) -> str:

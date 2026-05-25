@@ -72,6 +72,7 @@ def serialize_profile(
                 "weight": float(i.get("weight") or 1.0),
                 "embedding": _vec_to_list(i.get("embedding")),
                 "ts": _iso_from_ts(i.get("timestamp")),
+                "last_seen": _iso_from_ts(i.get("last_seen")),
                 "tags": list(i.get("tags") or []),
             }
             for i in interests
@@ -140,6 +141,7 @@ def deserialize_profile(
             float(item.get("weight") or 1.0),
             emb_vec,
             tags=tags,
+            last_seen=_ts_from_iso(item.get("last_seen") or item.get("ts")),
         )
         n_int += 1
 
@@ -161,6 +163,12 @@ def deserialize_profile(
             conn, centroids, labels, meta_per_cluster=meta_per_cluster
         )
         n_clu = len(incoming_clusters)
+    if mode == "append":
+        store.mark_profile_stale(
+            conn,
+            "profile append imported interests; rerun `uv run prepare.py --relabel-only` "
+            "or rebuild clusters with prepare.py",
+        )
     return {"interests_loaded": n_int, "clusters_loaded": n_clu}
 
 
@@ -190,6 +198,8 @@ def union_profiles(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
             "cluster_count": len(a.get("clusters") or [])
             + len(b.get("clusters") or []),
             "anonymized": False,
+            "clusters_coherent": False,
+            "needs_recluster": True,
             "merged_from": [
                 a.get("meta", {}).get("dmn_version", "?"),
                 b.get("meta", {}).get("dmn_version", "?"),
@@ -221,3 +231,14 @@ def _iso_from_ts(ts) -> str:
         return dt.datetime.utcfromtimestamp(float(ts)).isoformat() + "Z"
     except Exception:
         return ""
+
+
+def _ts_from_iso(value) -> float | None:
+    """Parse an ISO timestamp from profile JSON into unix seconds."""
+    if not value:
+        return None
+    try:
+        s = str(value).replace("Z", "+00:00")
+        return dt.datetime.fromisoformat(s).timestamp()
+    except Exception:
+        return None

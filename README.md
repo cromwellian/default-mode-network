@@ -11,7 +11,7 @@ There is no `val_bpb` here. There is no "right answer". The system rewards *alig
 DMN's seed quality lives or dies on its cluster labels. Done badly, the seed generator ends up asking "What's a fresh angle on YouTube (https://www.youtube.com/?" — which is what happened in v0.1.0 when labels were just the nearest-centroid interest's raw text. v0.1.2 fixes it in two places:
 
 1. **Browser-importer cleanup** (`dmn/importers/browser.py`). Before any clustering, the importer drops homepage visits, login pages, generic-domain titles ("YouTube", "GitHub", "Gmail", …), search-result pages, very-short titles, and per-host floods (max 5 entries per host). Pass `--keep-noise` to bypass.
-2. **LLM-synthesized cluster labels** (`dmn/labeling.py`). After k-means in embedding space, DMN picks the 12 nearest-centroid members per cluster and asks the configured LLM for `{"theme": "...", "subtopics": [...], "rationale": "..."}` — a *thematic* label, not a verbatim title. The theme is stored as the cluster's `label` column (back-compat); the subtopics and rationale go into a new `meta` JSON column. Subtopics flow through to seed prompts, so questions like "What's a fresh angle on contrarian nutrition science?" replace "What's a fresh angle on Oreos vs Statins (https://...)".
+2. **Synthesized cluster labels** (`dmn/labeling.py`). After clustering in embedding space, DMN picks the 12 nearest-medoid members per cluster and asks the configured LLM for `{"theme": "...", "subtopics": [...], "rationale": "..."}` — a *thematic* label, not a verbatim title. The theme is stored as the cluster's `label` column (back-compat); the subtopics and rationale go into a new `meta` JSON column. Subtopics flow through to seed prompts, so questions like "What's a fresh angle on contrarian nutrition science?" replace "What's a fresh angle on Oreos vs Statins (https://...)". Use `--local-labels` to force the deterministic local labeler so sampled interest text is not sent to a remote LLM during prepare/relabel.
 
 If a cluster's theme looks off, run `uv run prepare.py --relabel-only` to re-synthesize labels against the existing profile (no re-import, no re-cluster — fast). The dry-run path (`--dry-run`) uses a deterministic word-frequency fallback so you can iterate without burning API tokens.
 
@@ -30,6 +30,7 @@ uv run prepare.py --cluster-method gmm       # Gaussian mixture + BIC k-selectio
 
 # Tune recency half-life (days) and HDBSCAN min cluster size
 uv run prepare.py --recency-half-life 90 --min-cluster-size 20
+uv run prepare.py --local-labels  # privacy mode for cluster labels
 ```
 
 **Noise bucket:** points HDBSCAN cannot assign land in an `ambient / unclustered` cluster (`is_noise=1`). Seed sampling skips this bucket unless a small serendipity roll hits (~5%). Upgrade an existing profile:
@@ -207,10 +208,11 @@ uv run wander.py \
   --execute --iterations 20
 ```
 
-`--execute` is opt-in. It runs code-generating activities under `--sandbox subprocess`
-(default), `--sandbox docker` (requires Docker), or `--sandbox none`. The default
-subprocess mode strips all `*_API_KEY` / `*_TOKEN` / `*_SECRET` env vars from the child,
-so even a hostile LLM-generated script can't see your credentials. Run
+`--execute` is opt-in. It runs code-generating activities under `--sandbox auto`
+(default: Docker when available, otherwise subprocess), `--sandbox docker`,
+`--sandbox subprocess`, or `--sandbox none`. Subprocess mode strips all `*_API_KEY` /
+`*_TOKEN` / `*_SECRET` env vars from the child, so even a hostile LLM-generated script
+can't see your credentials, but Docker is stronger isolation when available. Run
 `uv run python -c "from dmn.sandbox import run_python; ..."` if you want to test it.
 
 `mutate_modality_switch` (v0.3) is a new tree-mode mutation that keeps the parent's
@@ -267,14 +269,14 @@ A copy of the skill also lives at `.claude/skills/default-mode-network/SKILL.md`
 
 ## Design choices
 
-- **Single file to modify.** The agent only touches `explore.py`. Everything else is plumbing.
+- **Small surface area.** `explore.py` remains the flat-loop playground, while stable plumbing lives under `dmn/`. Tree mode and activities now have their own modules, so deeper changes should include tests.
 - **Fixed budget.** Each session runs for a fixed iteration count (default 12) or wall-clock minutes. This makes runs comparable and keeps the agent honest.
 - **Dopamine, not loss.** The reward is a soft, multi-component score, computed in float space and logged with every brief:
   - `alignment` = max cosine similarity to your taste cluster centroids. Stuff you'd like.
   - `novelty` = `1 − max cosine similarity` to recent journal entries. Stuff you haven't seen.
   - `surprise` = how much more aligned to your taste than to your recent finds. *New angles* on the things you love.
   - `serendipity` = epsilon-greedy override: small chance to pursue a low-alignment, high-novelty item. Keeps your taste horizons drifting. Only fires when `fulfillment` meets a minimum floor — failed searches can't jackpot here.
-  - `fulfillment` = did the research/tools actually return useful material? Count + quality of tool hits, relevance cap when mean alignment is low, and a penalty when the LLM admits the search whiffed. Non-research activities default to 1.0.
+  - `fulfillment` = did the research/tools actually return useful material? Research uses count + quality of tool hits, relevance caps, and a penalty when the LLM admits the search whiffed. Creation/media activities use a shared score over grounding, artifacts, execution, and body quality.
   - `total = α·alignment + β·novelty + γ·surprise + δ·fulfillment + ε·serendipity`. Constants live at the top of `dmn/taste.py` — tune them.
 - **Multiple taste clusters, not a centroid.** Your interests are a polytopia. K-means over your interest embeddings preserves "I like Lisp AND fermentation AND polyrhythms", and the seed generator can sample one cluster *or* two distant ones (cross-pollination).
 - **Online learning.** High-dopamine briefs nudge the nearest cluster centroid by a small step. Your taste profile drifts as you read.
@@ -293,12 +295,14 @@ uv run profile.py export --out me.dmn.json
 uv run profile.py export --anonymize --out me.anon.dmn.json    # strips raw text
 uv run profile.py import friend.dmn.json --replace             # or --append
 uv run profile.py merge friend.dmn.json --blend 0.5            # see note below
+uv run eval.py unrated
+uv run eval.py rate 42 5 --feedback "exactly the kind of rabbit hole I wanted"
+uv run eval.py report
 ```
 
-**Heads-up:** `merge` is a *stub* in v0.1.1 — it produces a unioned profile (concat
-interests + concat clusters) but does not yet do real blended clustering. The actual
-weighted-Voronoi merge math lands in v0.2 (search `TODO(v0.2)` in `dmn/portability.py`).
-The `--blend` flag is parsed but currently ignored.
+**Heads-up:** `merge` still produces a unioned profile (concat interests + concat
+clusters), marks those clusters as incoherent, and expects you to import/recluster before
+using it as a real shared profile. The `--blend` flag is parsed but currently ignored.
 
 The export format (`profile.dmn.json`, schema v1) carries a per-model fingerprint so you
 can't accidentally import a profile built from a different embedding model — that would
@@ -307,8 +311,9 @@ silently corrupt distances. Re-embedding-on-import is also a v0.2 item.
 ## Reading the journal
 
 Each wander writes markdown briefs under `journal/` (for git/agent compatibility) and
-regenerates HTML views for browsing: `index.html` (all briefs by dopamine),
-`today.html` (last 24h rollup), `tree.html` (wander session tree), plus one
+regenerates HTML views for browsing: `dashboard.html` (run health, ratings, fulfillment),
+`index.html` (all briefs by dopamine), `today.html` (last 24h rollup),
+`tree.html` (wander session tree), plus one
 `{slug}.html` per brief. Open `journal/index.html` in a browser, or rebuild anytime
 with `uv run journal.py build`.
 
@@ -316,7 +321,7 @@ with `uv run journal.py build`.
 
 All profile data — your interview answers, browser history, embeddings, journal — lives **locally** in `data/` and `journal/`, both gitignored. None of it is uploaded anywhere.
 
-The only data that leaves your machine is the LLM call: when DMN asks Claude/OpenAI to brainstorm questions or synthesize a brief, the *seed question and the public search results* are sent. Your raw browser history, your sent emails, your interview transcript — none of that goes to the LLM directly. If even that's too much, run with `DMN_LLM_PROVIDER=stub` and a local embedding model and nothing leaves your laptop. (You'll get worse briefs, but they'll be your own.)
+The data that can leave your machine is whatever goes into an enabled remote LLM/API call. During normal wandering, DMN sends the seed question and public search results for planning/synthesis. During prepare/relabel, remote cluster labeling sends a small sample of cleaned interest text from each cluster so the LLM can name the theme. Use `uv run prepare.py --local-labels` / `uv run prepare.py --relabel-only --local-labels`, `DMN_LLM_PROVIDER=stub`, and local embeddings if you want nothing private sent to a remote model.
 
 ## Project structure
 
@@ -325,6 +330,8 @@ prepare.py            — one-time interview + importers + clustering (you can r
 explore.py            — the flat wandering loop (the agent edits this)
 wander.py             — best-first tree-search wander mode (v0.2)
 profile.py            — export / import / merge taste profiles across DMN installs
+journal.py            — rebuild HTML journal / run reports
+eval.py               — rate briefs and inspect dopamine-vs-rating alignment
 program.md            — agent instructions
 SKILL.md              — Anthropic skill format pointer
 dmn/                  — plumbing
@@ -333,7 +340,7 @@ dmn/                  — plumbing
   labeling.py         — LLM-synthesized cluster themes + per-interest tags
   loop.py             — shared synthesis prompt + tool planner + tool runner (v0.2)
   tree.py             — Frontier / Pruner / UCB / backprop / mutation operators (v0.2/v0.3)
-  sandbox.py          — subprocess / docker code execution with env stripping (v0.3)
+  sandbox.py          — auto / docker / subprocess code execution with env stripping
   embeddings.py       — sentence-transformers + openai backends + hash fallback
   llm.py              — anthropic / openai / ollama / lmstudio / stub providers
   store.py            — SQLite schema + helpers (v5 adds journal activity / artifacts / execution)
@@ -354,7 +361,7 @@ pyproject.toml
 - `dmn/taste.py` — the dopamine constants (`ALPHA`, `BETA`, `GAMMA`, `DELTA`, `EPS`, `SERENDIPITY_BONUS`, `SERENDIPITY_MIN_FULFILLMENT`). Serendipity now has two independent knobs: `EPS` is *how often* it fires (probability) and `SERENDIPITY_BONUS` is *how much it's worth* when it does. Crank either up to widen your horizons; crank down to drill in. Raise `DELTA` to reward briefs backed by solid tool hits.
 - `dmn/seeds.py` — the mix of seed strategies. The default `explore.py` samples them with fixed probabilities; tune those. Each `Seed` now carries a `query` (clean keywords handed to the search APIs) distinct from its `text` (the conversational question the LLM synthesizes against) — `search_query()` derives one from the other when a generator doesn't set it.
 - `wander.py --explore` — UCB exploration weight for tree-mode frontier selection. `0` is pure best-first (greedy); higher values give shallower/less-committed branches an exploration premium so the wander doesn't tunnel down one thread.
-- `explore.py` — *everything*. This is your editable file. Try a different planner, a different scorer, a different synthesis prompt. Log a one-line rationale at the top of the file every time you change it.
+- `explore.py` / `wander.py` — loop strategy. Try a different planner, scorer, synthesis prompt, or tree policy. Log a one-line rationale near the changed strategy.
 - `DMN_LLM_PROVIDER` env var: `anthropic` (default if `ANTHROPIC_API_KEY` set), `openai`, or `stub`.
 - `DMN_EMBEDDINGS` env var: `st` (default, sentence-transformers) or `openai`.
 

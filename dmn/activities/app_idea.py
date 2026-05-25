@@ -12,8 +12,8 @@ from dmn.grounding import (
     gather_grounding,
     grounding_block,
     grounding_footer,
-    grounding_fulfillment,
 )
+from dmn.fulfillment import compute_activity_fulfillment
 from dmn.seeds import Seed
 
 SYSTEM = (
@@ -108,6 +108,12 @@ class AppIdeaActivity:
                 raw,
             ]
         ) + grounding_footer(refs)
+        fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+            activity=self.name,
+            body_md=body,
+            artifacts=[],
+            grounding_items=refs,
+        )
         return ActivityResult(
             title=meta.get("name") or f"App idea: {seed.text[:60]}",
             body_md=body,
@@ -116,7 +122,8 @@ class AppIdeaActivity:
                 "name": meta.get("name"),
                 "elevator_pitch": meta.get("elevator_pitch"),
                 "complexity": meta.get("complexity"),
-                "fulfillment": grounding_fulfillment(refs),
+                "fulfillment": fulfillment,
+                "fulfillment_breakdown": fulfillment_breakdown,
                 "grounding": [
                     {"title": r.title, "url": r.url, "source": r.source} for r in refs
                 ],

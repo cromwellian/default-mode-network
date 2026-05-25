@@ -8,6 +8,7 @@ themes, then asks the LLM for a short reflective paragraph. Off by default; opt-
 from __future__ import annotations
 
 from dmn.activities import ActivityContext, ActivityResult, register
+from dmn.fulfillment import compute_activity_fulfillment
 from dmn.seeds import Seed
 
 SYSTEM = (
@@ -64,11 +65,21 @@ class MoodJournalActivity:
                 f"_(themes considered: {themes or 'none'})_",
             ]
         )
+        fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+            activity=self.name,
+            body_md=body,
+            artifacts=[],
+        )
         return ActivityResult(
             title=f"Mood journal: {seed.text[:60]}",
             body_md=body,
             embedding_text=seed.text + " :: " + entry[:300],
-            metadata={"themes": themes, "recent_count": len(ctx.recent_embs)},
+            metadata={
+                "themes": themes,
+                "recent_count": len(ctx.recent_embs),
+                "fulfillment": fulfillment,
+                "fulfillment_breakdown": fulfillment_breakdown,
+            },
         )
 
     def _summarize_clusters(self, clusters: list[dict]) -> str:

@@ -22,8 +22,8 @@ from dmn.grounding import (
     gather_grounding,
     grounding_block,
     grounding_footer,
-    grounding_fulfillment,
 )
+from dmn.fulfillment import compute_activity_fulfillment
 from dmn.sandbox import run_python
 from dmn.seeds import Seed
 
@@ -116,6 +116,13 @@ class CodeSketchActivity:
 
         refs = gather_grounding(seed, ctx)
         body = self._render_body(seed, code, meta, commentary, execution) + grounding_footer(refs)
+        fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+            activity=self.name,
+            body_md=body,
+            artifacts=artifacts,
+            grounding_items=refs,
+            execution=execution,
+        )
         return ActivityResult(
             title=meta.get("what_it_does") or f"Code sketch: {seed.text[:60]}",
             body_md=body,
@@ -126,7 +133,8 @@ class CodeSketchActivity:
                 "novelty": meta.get("novelty"),
                 "limitations": meta.get("limitations"),
                 "lines": len(code.splitlines()),
-                "fulfillment": grounding_fulfillment(refs),
+                "fulfillment": fulfillment,
+                "fulfillment_breakdown": fulfillment_breakdown,
                 "grounding": [
                     {"title": r.title, "url": r.url, "source": r.source} for r in refs
                 ],

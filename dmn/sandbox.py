@@ -1,8 +1,9 @@
 """Sandboxed execution for code-generating activities (v0.3).
 
 Three modes:
+  - `auto`:       use Docker when available, otherwise subprocess.
   - `subprocess`: `subprocess.run(...)` with a strict env strip (no API keys, secrets,
-    cloud creds visible to the child). Default. Cheap, decent isolation, no Docker dep.
+    cloud creds visible to the child). Cheap convenience mode, no Docker dep.
   - `docker`:     `docker run --rm --network=none --read-only -v <tmp>:/work` against
     a stock `python:3.11-slim`. Strong isolation; activated when the user passes
     `--sandbox docker` and `docker` is on PATH.
@@ -103,6 +104,7 @@ def run_python(
         }
     """
     code_path = Path(code_path).resolve()
+    mode = normalize_mode(mode)
     if mode == "none":
         return {
             "stdout": "",
@@ -238,3 +240,15 @@ def docker_available() -> bool:
         return proc.returncode == 0
     except Exception:
         return False
+
+
+def normalize_mode(mode: str) -> str:
+    """Resolve sandbox mode aliases. `auto` prefers Docker when the daemon is reachable."""
+    m = (mode or "auto").strip().lower()
+    if m in {"none", "off", "disabled"}:
+        return "none"
+    if m == "auto":
+        return "docker" if docker_available() else "subprocess"
+    if m in {"docker", "subprocess"}:
+        return m
+    return "subprocess"

@@ -44,7 +44,10 @@ CREATE TABLE IF NOT EXISTS journal (
     expanded_count INTEGER DEFAULT 0,
     last_improvement REAL,
     activity_budget TEXT,
-    cost_seconds REAL
+    cost_seconds REAL,
+    user_rating REAL,
+    user_feedback TEXT,
+    reviewed_at REAL
 );
 
 CREATE TABLE IF NOT EXISTS runs (
@@ -63,6 +66,12 @@ CREATE TABLE IF NOT EXISTS recent_findings (
     embedding TEXT,
     created_at REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS dmn_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at REAL NOT NULL
+);
 """
 
 
@@ -80,7 +89,7 @@ def _vec_from_json(s: Optional[str]) -> Optional[np.ndarray]:
     return np.asarray(json.loads(s), dtype=np.float32)
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -93,6 +102,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     v6: HDBSCAN medoids, cluster_method, is_noise, interests.last_seen
     v7: run/session identity + journal metrics
     v8: fulfillment + grounding references persisted on the journal row
+    v9: user ratings/feedback + explicit metadata table
     """
     for sql in [
         # v2
@@ -127,6 +137,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "ALTER TABLE journal ADD COLUMN fulfillment REAL",
         "ALTER TABLE journal ADD COLUMN fulfillment_breakdown TEXT",
         "ALTER TABLE journal ADD COLUMN grounding TEXT",
+        # v9 — explicit user feedback for reward calibration
+        "ALTER TABLE journal ADD COLUMN user_rating REAL",
+        "ALTER TABLE journal ADD COLUMN user_feedback TEXT",
+        "ALTER TABLE journal ADD COLUMN reviewed_at REAL",
     ]:
         try:
             conn.execute(sql)
@@ -134,11 +148,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
             pass
     conn.execute("CREATE TABLE IF NOT EXISTS schema_version (v INTEGER PRIMARY KEY)")
     conn.execute(
+        "CREATE TABLE IF NOT EXISTS dmn_meta ("
+        "key TEXT PRIMARY KEY, value TEXT, updated_at REAL NOT NULL)"
+    )
+    conn.execute(
         "CREATE TABLE IF NOT EXISTS runs ("
         "id TEXT PRIMARY KEY, started_at REAL, finished_at REAL, command TEXT, "
         "notes TEXT, best_score REAL, brief_count INTEGER)"
     )
-    conn.execute("INSERT OR IGNORE INTO schema_version(v) VALUES (?)", (SCHEMA_VERSION,))
+    conn.execute("DELETE FROM schema_version")
+    conn.execute("INSERT INTO schema_version(v) VALUES (?)", (SCHEMA_VERSION,))
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
 
 
@@ -318,7 +338,7 @@ _JOURNAL_COLUMNS = (
     "path, embedding, created_at, parent_id, mutation, depth, status, "
     "subtree_score, entities, rabbit_holes, activity, artifact_paths, execution_result, "
     "run_id, visit_count, expanded_count, last_improvement, activity_budget, cost_seconds, "
-    "fulfillment, fulfillment_breakdown, grounding"
+    "fulfillment, fulfillment_breakdown, grounding, user_rating, user_feedback, reviewed_at"
 )
 
 
@@ -353,6 +373,9 @@ def _row_to_journal(row: tuple) -> dict:
         "fulfillment": row[25],
         "fulfillment_breakdown": json.loads(row[26]) if row[26] else {},
         "grounding": json.loads(row[27]) if row[27] else [],
+        "user_rating": row[28],
+        "user_feedback": row[29],
+        "reviewed_at": row[30],
     }
 
 
@@ -622,3 +645,65 @@ def list_recent_findings(conn: sqlite3.Connection, limit: int = 50) -> list[dict
         (limit,),
     ).fetchall()
     return [{"text": r[0], "embedding": _vec_from_json(r[1])} for r in rows]
+
+
+def set_meta(conn: sqlite3.Connection, key: str, value) -> None:
+    """Set a small repository/profile metadata value as JSON."""
+    conn.execute(
+        "INSERT OR REPLACE INTO dmn_meta(key, value, updated_at) VALUES (?, ?, ?)",
+        (str(key), json.dumps(value), time.time()),
+    )
+    conn.commit()
+
+
+def get_meta(conn: sqlite3.Connection, key: str, default=None):
+    """Read a metadata value written by `set_meta`, returning default when absent."""
+    row = conn.execute("SELECT value FROM dmn_meta WHERE key = ?", (str(key),)).fetchone()
+    if not row or row[0] is None:
+        return default
+    try:
+        return json.loads(row[0])
+    except Exception:
+        return default
+
+
+def mark_profile_stale(conn: sqlite3.Connection, reason: str) -> None:
+    """Mark cluster labels/centroids as stale after import/merge-style operations."""
+    set_meta(
+        conn,
+        "profile_needs_recluster",
+        {"stale": True, "reason": reason, "marked_at": time.time()},
+    )
+
+
+def clear_profile_stale(conn: sqlite3.Connection) -> None:
+    """Clear the stale-profile marker after clustering succeeds."""
+    set_meta(conn, "profile_needs_recluster", {"stale": False, "reason": "", "marked_at": time.time()})
+
+
+def update_journal_rating(
+    conn: sqlite3.Connection,
+    journal_id: int,
+    rating: Optional[float],
+    feedback: Optional[str] = None,
+) -> None:
+    """Attach a user delight rating and optional feedback to a journal row."""
+    if rating is None:
+        rating_value = None
+    else:
+        rating_value = max(1.0, min(5.0, float(rating)))
+    conn.execute(
+        "UPDATE journal SET user_rating = ?, user_feedback = ?, reviewed_at = ? WHERE id = ?",
+        (rating_value, feedback, time.time(), int(journal_id)),
+    )
+    conn.commit()
+
+
+def list_rated_journal(conn: sqlite3.Connection, limit: int = 500) -> list[dict]:
+    """Return recent journal entries with a user rating, newest reviews first."""
+    rows = conn.execute(
+        f"SELECT {_JOURNAL_COLUMNS} FROM journal WHERE user_rating IS NOT NULL "
+        "ORDER BY reviewed_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [_row_to_journal(r) for r in rows]

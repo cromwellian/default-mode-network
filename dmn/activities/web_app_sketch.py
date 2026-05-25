@@ -11,8 +11,8 @@ from dmn.grounding import (
     gather_grounding,
     grounding_block,
     grounding_footer,
-    grounding_fulfillment,
 )
+from dmn.fulfillment import compute_activity_fulfillment
 from dmn.seeds import Seed
 
 SYSTEM = (
@@ -100,6 +100,9 @@ class WebAppSketchActivity:
         if html_text is None:
             # Generation/parse failed (e.g. truncated output). Don't write a misleading
             # canned "Signal Mixer" — return a skipped result like the research activity.
+            fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+                activity=self.name, body_md="", skipped=True
+            )
             return ActivityResult(
                 title=f"Web app (skipped): {seed.text[:60]}",
                 body_md="",
@@ -108,6 +111,8 @@ class WebAppSketchActivity:
                     "skipped": True,
                     "reason": "generation_failed",
                     "activity": self.name,
+                    "fulfillment": fulfillment,
+                    "fulfillment_breakdown": fulfillment_breakdown,
                 },
             )
         slug = slugify(seed.text, n=50)
@@ -136,6 +141,12 @@ class WebAppSketchActivity:
         )
         refs = gather_grounding(seed, ctx)
         body = self._render_body(seed, artifact, manifest) + grounding_footer(refs)
+        fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+            activity=self.name,
+            body_md=body,
+            artifacts=[artifact],
+            grounding_items=refs,
+        )
         return ActivityResult(
             title=manifest["title"],
             body_md=body,
@@ -146,7 +157,8 @@ class WebAppSketchActivity:
                 "summary": manifest["summary"],
                 "interaction": manifest["interaction"],
                 "artifact_paths": [str(index_path), str(manifest_path)],
-                "fulfillment": grounding_fulfillment(refs),
+                "fulfillment": fulfillment,
+                "fulfillment_breakdown": fulfillment_breakdown,
                 "grounding": [
                     {"title": r.title, "url": r.url, "source": r.source} for r in refs
                 ],

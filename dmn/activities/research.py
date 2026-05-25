@@ -78,7 +78,8 @@ class ResearchActivity:
         query = (seed.query or "").strip() or search_query(
             seed.text, subtopic=seed.subtopic
         )
-        plan = plan_tools(seed.text, ctx.llm, ctx.dry_run, ctx.rng)
+        forced_tools = list(getattr(ctx, "forced_tools", None) or [])
+        plan = forced_tools or plan_tools(seed.text, ctx.llm, ctx.dry_run, ctx.rng)
         items = execute_tools(plan, query, verbose=ctx.verbose)
         scored: list[tuple[float, dict, ResearchItem]] = []
         item_totals: list[float] = []
@@ -108,6 +109,7 @@ class ResearchActivity:
                     "skipped": True,
                     "reason": "empty_search",
                     "tools": plan,
+                    "forced_tools": bool(forced_tools),
                     "items_count": 0,
                     "fulfillment": fulfillment,
                     "fulfillment_breakdown": breakdown,
@@ -151,6 +153,7 @@ class ResearchActivity:
                     "skipped": True,
                     "reason": "empty_search_after_retry",
                     "tools": plan,
+                    "forced_tools": bool(forced_tools),
                     "items_count": 0,
                     "fulfillment": fulfillment,
                     "fulfillment_breakdown": breakdown,
@@ -193,6 +196,7 @@ class ResearchActivity:
             embedding_text=seed.text + " :: " + body[:1000],
             metadata={
                 "tools": plan,
+                "forced_tools": bool(forced_tools),
                 "items_count": len(items),
                 "entities": entities,
                 "rabbit_holes": rabbit_holes,

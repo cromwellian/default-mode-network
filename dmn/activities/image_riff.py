@@ -9,6 +9,7 @@ from __future__ import annotations
 from dmn import generators as gens
 from dmn.activities import ActivityContext, ActivityResult, register
 from dmn.activities._helpers import slugify
+from dmn.fulfillment import compute_activity_fulfillment
 from dmn.journal import JOURNAL_DIR
 from dmn.paths import artifact_href_for_journal
 from dmn.seeds import Seed
@@ -44,14 +45,22 @@ class ImageRiffActivity:
         visual_prompt = self._make_visual_prompt(seed, ctx)
         backend = self._pick_backend(ctx)
         if backend is None:
+            body = (
+                f"## Image riff\n\n**Seed:** {seed.text}\n\n"
+                "_(no image backend available)_"
+            )
+            fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+                activity=self.name, body_md=body, skipped=True
+            )
             return ActivityResult(
                 title=f"Image (skipped): {seed.text[:60]}",
-                body_md=(
-                    f"## Image riff\n\n**Seed:** {seed.text}\n\n"
-                    "_(no image backend available)_"
-                ),
+                body_md=body,
                 embedding_text=seed.text,
-                metadata={"skipped": True},
+                metadata={
+                    "skipped": True,
+                    "fulfillment": fulfillment,
+                    "fulfillment_breakdown": fulfillment_breakdown,
+                },
             )
         artifact = None
         errors: list[str] = []
@@ -63,17 +72,31 @@ class ImageRiffActivity:
                 errors.append(f"{backend.name}: {e}")
         if artifact is None:
             err = "; ".join(errors) if errors else "no image backend available"
+            body = (
+                f"## Image riff\n\n**Seed:** {seed.text}\n\n"
+                f"_(all generators failed: {err})_"
+            )
+            fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+                activity=self.name, body_md=body, skipped=True
+            )
             return ActivityResult(
                 title=f"Image (failed): {seed.text[:60]}",
-                body_md=(
-                    f"## Image riff\n\n**Seed:** {seed.text}\n\n"
-                    f"_(all generators failed: {err})_"
-                ),
+                body_md=body,
                 embedding_text=seed.text,
-                metadata={"error": err, "generator": backend.name if backend else None},
+                metadata={
+                    "error": err,
+                    "generator": backend.name if backend else None,
+                    "fulfillment": fulfillment,
+                    "fulfillment_breakdown": fulfillment_breakdown,
+                },
             )
         commentary = self._curator_blurb(seed, visual_prompt, ctx)
         body = self._render_body(seed, visual_prompt, artifact, commentary, artifact.generator)
+        fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+            activity=self.name,
+            body_md=body,
+            artifacts=[artifact],
+        )
         return ActivityResult(
             title=f"Image: {seed.text[:60]}",
             body_md=body,
@@ -82,6 +105,8 @@ class ImageRiffActivity:
             metadata={
                 "generator": artifact.generator,
                 "visual_prompt": visual_prompt,
+                "fulfillment": fulfillment,
+                "fulfillment_breakdown": fulfillment_breakdown,
             },
         )
 

@@ -12,7 +12,7 @@ You are the wandering mind. Your job is to take a round of mind-wandering for th
    ```
    sqlite3 data/dmn.sqlite "SELECT id, label FROM clusters ORDER BY id"
    ```
-   and read the synthesized themes back to the user. If any theme looks like a raw URL, a generic domain ("YouTube", "GitHub"), or otherwise off-key, offer to re-run `uv run prepare.py --relabel-only` for a fresh synthesis pass. Don't launch a wander against bad themes — every seed will inherit the noise.
+   and read the synthesized themes back to the user. If any theme looks like a raw URL, a generic domain ("YouTube", "GitHub"), or otherwise off-key, offer to re-run `uv run prepare.py --relabel-only` for a fresh synthesis pass, or `uv run prepare.py --relabel-only --local-labels` if they do not want sampled interest text sent to a remote LLM. Don't launch a wander against bad themes — every seed will inherit the noise.
 4. Confirm the user is ready to wander.
 
 ## Wander (each session)
@@ -57,9 +57,10 @@ Available activities: `research` (default), `code_sketch`, `app_idea`,
 `--activities research,code_sketch` so the agent doesn't only return text briefs.
 
 `--execute` enables sandboxed code execution for `code_sketch` / `algorithm_explore`
-/ `ml_experiment`. Default sandbox is `subprocess` with a strict env-strip (no `*_API_KEY`
-/ `*_TOKEN` / `*_SECRET` reach the child). Use `--sandbox docker` for stronger
-isolation if the user has Docker, or `--no-execute` to disable execution entirely.
+/ `ml_experiment`. Default sandbox is `auto`: Docker when available, otherwise
+`subprocess` with a strict env-strip (no `*_API_KEY` / `*_TOKEN` / `*_SECRET` reach the
+child). Use `--sandbox docker` to require stronger isolation, or `--no-execute` to
+disable execution entirely.
 
 Several activities require additional env keys:
 - `image_riff`: `GOOGLE_API_KEY` (Nano Banana) or `REPLICATE_API_TOKEN` (Flux Schnell).
@@ -96,7 +97,7 @@ Once `explore.py` returns:
 
 1. Surface the **top 3 highest-dopamine briefs** from this session in chat. Include the dopamine score breakdown for each (`{alignment, novelty, surprise, serendipity, total}`).
 2. Optionally suggest **one direction** the user might want to follow up on tomorrow — usually pulled from one of the briefs' "rabbit hole" sections.
-3. Mention the path to `journal/today.md` so the user can read the full morning notebook.
+3. Mention `journal/dashboard.html` for run health and `journal/today.md` for the full morning notebook. If the user gives feedback, record it with `uv run eval.py rate <id> <1-5>`.
 
 ## What you can and cannot do
 
@@ -112,7 +113,7 @@ Once `explore.py` returns:
 
 - Modify files in `dmn/` (the stable plumbing). If a tool backend is broken, surface the error and ask.
 - Delete files from `data/` or `journal/`. The user's profile and journal are precious.
-- Send any of the user's raw imported data (browser history, sent emails, etc.) to the LLM. Only the seed question and the *public* search results may go through the LLM. The plumbing already enforces this; don't try to be clever.
+- Send raw imported data to the LLM during wandering. Normal wander prompts should contain only the seed question and public search results. Prepare/relabel may send sampled cleaned interest text for cluster labeling unless the user chooses `--local-labels`.
 - Add new dependencies to `pyproject.toml` without asking.
 
 ## When you run out of ideas

@@ -37,6 +37,7 @@ from dmn import generators as gens
 from dmn import html_journal, journal, seeds, store, taste
 from dmn.activities import ActivityContext, ActivityResult
 from dmn.llm import get_llm
+from dmn.sandbox import normalize_mode
 
 console = Console()
 
@@ -94,9 +95,9 @@ def main(
         help="Alias for --sandbox none; disables code execution.",
     ),
     sandbox: str = typer.Option(
-        "subprocess",
+        "auto",
         "--sandbox",
-        help="Execution sandbox: 'subprocess' | 'docker' | 'none'.",
+        help="Execution sandbox: 'auto' | 'docker' | 'subprocess' | 'none'.",
     ),
     generate: bool = typer.Option(
         False,
@@ -128,7 +129,7 @@ def main(
             f"Generators: [bold]on[/] (modalities: {sorted(enabled_modalities)})"
         )
 
-    sandbox_mode = "none" if no_execute else sandbox
+    sandbox_mode = "none" if no_execute else normalize_mode(sandbox)
     if execute and sandbox_mode == "none":
         console.print("[yellow]--execute requested but --sandbox none; ignoring --execute[/]")
         execute = False

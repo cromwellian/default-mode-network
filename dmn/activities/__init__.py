@@ -58,6 +58,7 @@ class ActivityContext:
     code_budget: str = "small"
     ground: bool = True  # creation activities consume external references before riffing
     grounding_cache: dict = field(default_factory=dict)  # query -> [ResearchItem], per run
+    forced_tools: Optional[list[str]] = None  # tree retool override for research
 
 
 @runtime_checkable

@@ -252,6 +252,104 @@ class StorePersistenceTests(unittest.TestCase):
         self.assertEqual(row["grounding"][0]["source"], "github")
         self.assertEqual(row["fulfillment_breakdown"]["count_score"], 1.0)
 
+    def test_schema_version_and_user_rating_roundtrip(self):
+        import tempfile
+        from dmn import store
+
+        c = store.connect(tempfile.mktemp(suffix=".sqlite"))
+        v = c.execute("PRAGMA user_version").fetchone()[0]
+        self.assertGreaterEqual(v, store.SCHEMA_VERSION)
+        jid = store.add_journal(
+            c, "seed", "cold", [], {"total": 0.4}, "/tmp/x.md"
+        )
+        store.update_journal_rating(c, jid, 4.5, "nice")
+        row = store.get_journal(c, jid)
+        self.assertEqual(row["user_rating"], 4.5)
+        self.assertEqual(row["user_feedback"], "nice")
+        self.assertIsNotNone(row["reviewed_at"])
+
+
+class EvaluationTests(unittest.TestCase):
+    def test_eval_summary_correlates_components(self):
+        from dmn import eval as dmn_eval
+
+        rows = [
+            {"user_rating": 1, "dopamine_total": 0.1, "dopamine_breakdown": {"total": 0.1, "alignment": 0.1}},
+            {"user_rating": 3, "dopamine_total": 0.5, "dopamine_breakdown": {"total": 0.5, "alignment": 0.5}},
+            {"user_rating": 5, "dopamine_total": 0.9, "dopamine_breakdown": {"total": 0.9, "alignment": 0.9}},
+        ]
+        summary = dmn_eval.summarize(rows)
+        self.assertEqual(summary["count"], 3)
+        self.assertAlmostEqual(summary["correlations"]["total"], 1.0)
+
+
+class RetoolTests(unittest.TestCase):
+    def test_research_activity_respects_forced_tools(self):
+        import dmn.activities.research as research
+        from dmn.activities import ActivityContext
+        from dmn.tools import ResearchItem
+
+        calls = []
+
+        def fake_exec(tools, query, verbose=False, log=None):
+            calls.append(list(tools))
+            return [ResearchItem(title="Forced result", summary="Useful result", url="http://x", source=tools[0])]
+
+        old_exec = research.execute_tools
+        research.execute_tools = fake_exec
+
+        class LLM:
+            name = "stub"
+
+            def complete(self, *args, **kwargs):
+                class R:
+                    text = "## What surprised me\nx\n\n## One thing you'll find delightful\nx\n\n## A rabbit hole for tomorrow\nx"
+
+                return R()
+
+        ctx = ActivityContext(
+            llm=LLM(),
+            embed_fn=lambda texts: np.ones((len(texts), 4), dtype=np.float32),
+            clusters=[],
+            centroids=[np.ones(4, dtype=np.float32)],
+            recent_embs=[],
+            rng=random.Random(0),
+            dry_run=True,
+            forced_tools=["hackernews"],
+        )
+        try:
+            result = research.ResearchActivity().run(Seed("topic", "retool"), ctx)
+        finally:
+            research.execute_tools = old_exec
+        self.assertEqual(calls[0], ["hackernews"])
+        self.assertTrue(result.metadata["forced_tools"])
+
+
+class PortabilityStaleTests(unittest.TestCase):
+    def test_append_import_marks_profile_stale(self):
+        import tempfile
+        from dmn import portability, store
+
+        c = store.connect(tempfile.mktemp(suffix=".sqlite"))
+        payload = {
+            "schema_version": portability.SCHEMA_VERSION,
+            "embedding_model": {
+                "fingerprint": portability.compute_embedding_fingerprint(),
+            },
+            "interests": [
+                {
+                    "text": "friend taste",
+                    "source": "imported",
+                    "weight": 1.0,
+                    "embedding": [0.0] * 384,
+                }
+            ],
+            "clusters": [],
+        }
+        portability.deserialize_profile(payload, c, mode="append")
+        marker = store.get_meta(c, "profile_needs_recluster")
+        self.assertTrue(marker["stale"])
+
 
 class SeedDiversityTests(unittest.TestCase):
     """Roots should span clusters, not collapse onto the heaviest one."""

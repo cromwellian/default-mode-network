@@ -22,8 +22,8 @@ from dmn.grounding import (
     gather_grounding,
     grounding_block,
     grounding_footer,
-    grounding_fulfillment,
 )
+from dmn.fulfillment import compute_activity_fulfillment
 from dmn.journal import JOURNAL_DIR
 from dmn.paths import artifact_href_for_journal
 from dmn.sandbox import run_python
@@ -155,6 +155,13 @@ class AlgorithmExploreActivity:
 
         refs = gather_grounding(seed, ctx)
         body = self._render_body(seed, code, meta, commentary, execution, out_dir) + grounding_footer(refs)
+        fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+            activity=self.name,
+            body_md=body,
+            artifacts=artifacts,
+            grounding_items=refs,
+            execution=execution,
+        )
         return ActivityResult(
             title=meta.get("algorithm") or f"Algorithm: {seed.text[:60]}",
             body_md=body,
@@ -165,7 +172,8 @@ class AlgorithmExploreActivity:
                 "why_interesting": meta.get("why_interesting"),
                 "complexity": meta.get("complexity"),
                 "lines": len(code.splitlines()),
-                "fulfillment": grounding_fulfillment(refs),
+                "fulfillment": fulfillment,
+                "fulfillment_breakdown": fulfillment_breakdown,
                 "grounding": [
                     {"title": r.title, "url": r.url, "source": r.source} for r in refs
                 ],

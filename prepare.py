@@ -224,13 +224,18 @@ def main(
         "--dry-run",
         help="No API calls; install a small synthetic profile and use the stub LLM for labels.",
     ),
+    local_labels: bool = typer.Option(
+        False,
+        "--local-labels",
+        help="Do not send sampled interest text to a remote LLM for cluster labels.",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Initialize data/dmn.sqlite with a taste profile (interview + importers + clustering)."""
     _banner()
 
     if relabel_only:
-        _relabel_only(dry_run=dry_run, verbose=verbose)
+        _relabel_only(dry_run=dry_run, local_labels=local_labels, verbose=verbose)
         return
 
     interests: list[dict] = []
@@ -355,7 +360,7 @@ def main(
         f"({100.0 * result.n_noise / max(len(vectors), 1):.1f}%)"
     )
 
-    llm = get_llm(dry_run=dry_run)
+    llm = get_llm(dry_run=True) if local_labels else get_llm(dry_run=dry_run)
     console.print(
         f"Synthesizing cluster labels via [bold]{llm.name}[/] LLM…"
     )
@@ -382,6 +387,7 @@ def main(
         cluster_metas,
         is_noise_flags,
     )
+    store.clear_profile_stale(conn)
 
     _print_cluster_table(
         result, vectors, texts, synth_labels, cluster_themes, result.medoid_indices
@@ -392,7 +398,7 @@ def main(
     )
 
 
-def _relabel_only(dry_run: bool, verbose: bool) -> None:
+def _relabel_only(dry_run: bool, local_labels: bool, verbose: bool) -> None:
     """Re-synthesize cluster labels against the existing profile, skipping import + reclustering."""
     conn = store.connect()
     interests = store.list_interests(conn)
@@ -433,7 +439,7 @@ def _relabel_only(dry_run: bool, verbose: bool) -> None:
 
     labels = _assign_labels(vectors, centroids)
 
-    llm = get_llm(dry_run=dry_run)
+    llm = get_llm(dry_run=True) if local_labels else get_llm(dry_run=dry_run)
     console.print(
         f"Re-synthesizing labels for [bold]{len(centroids)}[/] cluster(s) "
         f"via [bold]{llm.name}[/] LLM…"

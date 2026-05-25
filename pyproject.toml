@@ -34,6 +34,15 @@ generators = ["google-genai>=0.3.0", "replicate>=0.30.0", "Pillow>=10.0.0", "req
 code = ["matplotlib>=3.8.0"]
 ml = ["torch>=2.2.0", "numpy>=1.26.0"]
 activities = ["matplotlib>=3.8.0", "torch>=2.2.0", "requests>=2.31.0"]
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+dmn-prepare = "dmn.cli:prepare"
+dmn-explore = "dmn.cli:explore"
+dmn-wander = "dmn.cli:wander"
+dmn-profile = "profile:app"
+dmn-journal = "journal:app"
+dmn-eval = "eval:app"
 
 [project.urls]
 Homepage = "https://github.com/cromwellian/default-mode-network"
@@ -53,6 +62,7 @@ include = [
     "wander.py",
     "journal.py",
     "profile.py",
+    "eval.py",
     "program.md",
     "SKILL.md",
     "README.md",

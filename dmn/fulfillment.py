@@ -104,6 +104,85 @@ def compute_fulfillment(
     return float(fulfillment), breakdown
 
 
+def compute_activity_fulfillment(
+    *,
+    activity: str,
+    body_md: str = "",
+    artifacts: Sequence | None = None,
+    grounding_items: Sequence | None = None,
+    execution: dict | None = None,
+    skipped: bool = False,
+) -> tuple[float, dict]:
+    """Fulfillment for non-research activities.
+
+    The goal is to reward concrete, inspectable work: a real body, useful grounding,
+    produced artifacts, and successful execution when execution was attempted.
+    """
+    if skipped:
+        return 0.0, {
+            "body": 0.0,
+            "artifact": 0.0,
+            "grounding": 0.0,
+            "execution": 0.0,
+            "fulfillment": 0.0,
+        }
+    has_body = bool((body_md or "").strip())
+    artifact_count = len(list(artifacts or []))
+    grounding_count = len(list(grounding_items or []))
+
+    body_score = 1.0 if has_body else 0.0
+    artifact_score = 1.0 if artifact_count > 0 else (0.0 if activity in {
+        "code_sketch",
+        "algorithm_explore",
+        "ml_experiment",
+        "image_riff",
+        "music_riff",
+        "video_riff",
+        "web_app_sketch",
+    } else 0.5)
+    if grounding_count >= 2:
+        grounding_score = 1.0
+    elif grounding_count == 1:
+        grounding_score = 0.85
+    else:
+        grounding_score = 0.65
+
+    if execution is None:
+        execution_score = 0.75 if activity in {
+            "code_sketch",
+            "algorithm_explore",
+            "ml_experiment",
+        } else 1.0
+    elif execution.get("exit_code") == 0 and not execution.get("timed_out"):
+        execution_score = 1.0
+    elif execution.get("exit_code") in (-1, -10):
+        execution_score = 0.55
+    else:
+        execution_score = 0.25
+
+    if activity in {"app_idea", "mood_journal"}:
+        weights = (0.60, 0.00, 0.30, 0.10)
+    elif activity in {"image_riff", "music_riff", "video_riff", "web_app_sketch"}:
+        weights = (0.25, 0.45, 0.20, 0.10)
+    else:
+        weights = (0.25, 0.30, 0.20, 0.25)
+
+    score = (
+        weights[0] * body_score
+        + weights[1] * artifact_score
+        + weights[2] * grounding_score
+        + weights[3] * execution_score
+    )
+    score = max(0.0, min(1.0, float(score)))
+    return score, {
+        "body": round(body_score, 4),
+        "artifact": round(artifact_score, 4),
+        "grounding": round(grounding_score, 4),
+        "execution": round(execution_score, 4),
+        "fulfillment": round(score, 4),
+    }
+
+
 def item_alignments(
     items: list,
     centroids: Sequence,

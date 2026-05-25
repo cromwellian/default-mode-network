@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dmn import generators as gens
 from dmn.activities import ActivityContext, ActivityResult, register
+from dmn.fulfillment import compute_activity_fulfillment
 from dmn.journal import JOURNAL_DIR
 from dmn.paths import artifact_href_for_journal
 from dmn.seeds import Seed
@@ -36,26 +37,42 @@ class VideoRiffActivity:
         prompt = self._make_prompt(seed, ctx)
         backend = self._pick_backend(ctx)
         if backend is None:
+            body = (
+                f"## Video riff\n\n**Seed:** {seed.text}\n\n"
+                "_(no video backend available)_"
+            )
+            fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+                activity=self.name, body_md=body, skipped=True
+            )
             return ActivityResult(
                 title=f"Video (skipped): {seed.text[:60]}",
-                body_md=(
-                    f"## Video riff\n\n**Seed:** {seed.text}\n\n"
-                    "_(no video backend available)_"
-                ),
+                body_md=body,
                 embedding_text=seed.text,
-                metadata={"skipped": True},
+                metadata={
+                    "skipped": True,
+                    "fulfillment": fulfillment,
+                    "fulfillment_breakdown": fulfillment_breakdown,
+                },
             )
         try:
             artifact = backend.generate(prompt)
         except Exception as e:
+            body = (
+                f"## Video riff\n\n**Seed:** {seed.text}\n\n"
+                f"_(generator `{backend.name}` failed: {e})_"
+            )
+            fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+                activity=self.name, body_md=body, skipped=True
+            )
             return ActivityResult(
                 title=f"Video (failed): {seed.text[:60]}",
-                body_md=(
-                    f"## Video riff\n\n**Seed:** {seed.text}\n\n"
-                    f"_(generator `{backend.name}` failed: {e})_"
-                ),
+                body_md=body,
                 embedding_text=seed.text,
-                metadata={"error": str(e)},
+                metadata={
+                    "error": str(e),
+                    "fulfillment": fulfillment,
+                    "fulfillment_breakdown": fulfillment_breakdown,
+                },
             )
         raw = artifact.bytes_path or artifact.url or ""
         target = (
@@ -74,12 +91,22 @@ class VideoRiffActivity:
                 f"[Watch]({target})" if target else "_(no output bytes)_",
             ]
         )
+        fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
+            activity=self.name,
+            body_md=body,
+            artifacts=[artifact],
+        )
         return ActivityResult(
             title=f"Video: {seed.text[:60]}",
             body_md=body,
             artifacts=[artifact],
             embedding_text=seed.text + " :: " + prompt[:300],
-            metadata={"generator": backend.name, "video_prompt": prompt},
+            metadata={
+                "generator": backend.name,
+                "video_prompt": prompt,
+                "fulfillment": fulfillment,
+                "fulfillment_breakdown": fulfillment_breakdown,
+            },
         )
 
     def _make_prompt(self, seed: Seed, ctx: ActivityContext) -> str:

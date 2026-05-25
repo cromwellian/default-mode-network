@@ -42,6 +42,7 @@ from dmn import report as report_mod
 from dmn.activities import ActivityContext, ActivityResult
 from dmn.llm import get_llm
 from dmn.loop import available_tools_for
+from dmn.sandbox import normalize_mode
 
 console = Console()
 
@@ -126,9 +127,9 @@ def main(
         help="Alias for --sandbox none; disables code execution.",
     ),
     sandbox: str = typer.Option(
-        "subprocess",
+        "auto",
         "--sandbox",
-        help="Execution sandbox: 'subprocess' | 'docker' | 'none'.",
+        help="Execution sandbox: 'auto' | 'docker' | 'subprocess' | 'none'.",
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Stub LLM and only no-auth tools."
@@ -204,7 +205,7 @@ def main(
             f"Generators: [bold]on[/] (modalities: {sorted(enabled_modalities)})"
         )
 
-    sandbox_mode = "none" if no_execute else sandbox
+    sandbox_mode = "none" if no_execute else normalize_mode(sandbox)
     if execute and sandbox_mode == "none":
         console.print("[yellow]--execute requested but --sandbox none; ignoring --execute[/]")
         execute = False
@@ -715,15 +716,16 @@ def _expand_brief(
         )
     )
 
-    # Forced tools only meaningful for the research activity. Patch the seed via a
-    # small attribute mutation isn't possible (frozen dataclass) — we instead let the
-    # research activity recompute its plan. retool acts as a hint; v0.4 work.
     node_started = time.time()
+    old_forced_tools = getattr(ctx, "forced_tools", None)
+    ctx.forced_tools = forced_tools if activity.name == "research" else None
     try:
         result: ActivityResult = activity.run(chosen_seed, ctx)
     except Exception as e:
         console.print(f"[red]  activity {activity.name} crashed: {e}[/]")
         return None, 0.0, None
+    finally:
+        ctx.forced_tools = old_forced_tools
 
     if not (result.body_md or "").strip():
         reason = result.metadata.get("reason", "empty body")

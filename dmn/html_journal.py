@@ -290,6 +290,31 @@ article.brief-body th { background: var(--bg-elev); }
 .tree-node { padding: 0.35rem 0; font-size: 0.875rem; }
 .tree-node .score { font-family: var(--mono); color: var(--accent); font-size: 0.8rem; }
 
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0 2rem;
+}
+.metric-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  padding: 0.9rem 1rem;
+}
+.metric-card .label {
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.metric-card .value {
+  font-family: var(--mono);
+  font-size: 1.3rem;
+  margin-top: 0.2rem;
+  color: var(--accent);
+}
+
 .mermaid { background: transparent; }
 """
 
@@ -328,7 +353,7 @@ def build_html_journal(
     for e in entry_list:
         md_path = e.get("path")
         if md_path and Path(md_path).exists():
-            write_brief_html(Path(md_path), out_dir)
+            write_brief_html(Path(md_path), out_dir, entry=e)
 
     # Also convert any markdown briefs on disk not in SQLite (stale paths).
     known_md = {e.get("path") for e in entry_list if e.get("path")}
@@ -339,13 +364,18 @@ def build_html_journal(
     nodes = session_nodes if session_nodes is not None else _latest_session_nodes(entry_list)
     paths = {
         "index": write_index_html(entry_list, out_dir),
+        "dashboard": write_dashboard_html(entry_list, out_dir),
         "today": write_today_html(entry_list, out_dir),
         "tree": write_tree_html(nodes, out_dir),
     }
     return paths
 
 
-def write_brief_html(md_path: Path, journal_dir: Path | str = JOURNAL_DIR) -> Path:
+def write_brief_html(
+    md_path: Path,
+    journal_dir: Path | str = JOURNAL_DIR,
+    entry: Optional[dict] = None,
+) -> Path:
     """Render one markdown brief to HTML."""
     md_path = Path(md_path)
     out_dir = Path(journal_dir)
@@ -380,6 +410,11 @@ def write_brief_html(md_path: Path, journal_dir: Path | str = JOURNAL_DIR) -> Pa
         tags.append(f'<span class="chip chip-muted">depth {int(depth)}</span>')
     if status and status != "open":
         tags.append(f'<span class="chip chip-muted">{html.escape(str(status))}</span>')
+    rating = fm.get("user_rating")
+    if rating is None and entry is not None:
+        rating = entry.get("user_rating")
+    if rating is not None:
+        tags.append(f'<span class="chip chip-muted">rated {float(rating):.1f}/5</span>')
 
     breakdown = " · ".join(
         f"{k} {float(v):.2f}"
@@ -458,6 +493,7 @@ def write_index_html(
         mutation = e.get("mutation")
         depth = e.get("depth")
         tools = html.escape(", ".join(e.get("tools") or []))
+        rating = e.get("user_rating")
 
         tags = [_activity_chip_html(activity)]
         if mutation:
@@ -466,6 +502,8 @@ def write_index_html(
             )
         if depth:
             tags.append(f'<span class="chip chip-muted">d{int(depth)}</span>')
+        if rating is not None:
+            tags.append(f'<span class="chip chip-muted">rated {float(rating):.1f}/5</span>')
 
         items.append(
             f"""<li class="brief-item">
@@ -488,6 +526,92 @@ def write_index_html(
 """
     out = out_dir / "index.html"
     out.write_text(_page("Index", "index", body, wide=True), encoding="utf-8")
+    return out
+
+
+def write_dashboard_html(
+    entries: Iterable[dict], journal_dir: Path | str = JOURNAL_DIR
+) -> Path:
+    """Write journal/dashboard.html with run health, reward, and feedback summaries."""
+    out_dir = Path(journal_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    entry_list = list(entries)
+    count = len(entry_list)
+    rated = [e for e in entry_list if e.get("user_rating") is not None]
+    dopamine = [float(e.get("dopamine_total") or 0.0) for e in entry_list]
+    fulfillments = [
+        float(e.get("fulfillment"))
+        for e in entry_list
+        if e.get("fulfillment") is not None
+    ]
+    run_ids = {e.get("run_id") for e in entry_list if e.get("run_id")}
+    stale = ""
+    try:
+        from dmn import store
+
+        if store.DB_PATH.exists():
+            conn = store.connect()
+            try:
+                marker = store.get_meta(conn, "profile_needs_recluster", {})
+            finally:
+                conn.close()
+            if marker and marker.get("stale"):
+                stale = html.escape(marker.get("reason") or "profile needs reclustering")
+    except Exception:
+        stale = ""
+
+    def mean(xs: list[float]) -> float:
+        return sum(xs) / len(xs) if xs else 0.0
+
+    cards = [
+        ("briefs", str(count)),
+        ("runs", str(len(run_ids))),
+        ("mean dopamine", f"{mean(dopamine):.3f}" if dopamine else "n/a"),
+        ("mean fulfillment", f"{mean(fulfillments):.3f}" if fulfillments else "n/a"),
+        ("rated", f"{len(rated)} / {count}" if count else "0"),
+        ("mean rating", f"{mean([float(e['user_rating']) for e in rated]):.2f}/5" if rated else "n/a"),
+    ]
+    card_html = "".join(
+        f'<section class="metric-card"><div class="label">{html.escape(label)}</div>'
+        f'<div class="value">{html.escape(value)}</div></section>'
+        for label, value in cards
+    )
+
+    activity_rows = ""
+    for name, count_by_activity, mean_d in _activity_breakdown(entry_list):
+        activity_rows += (
+            f"<tr><td>{html.escape(name)}</td><td class='num'>{count_by_activity}</td>"
+            f"<td class='num'>{mean_d:.3f}</td></tr>\n"
+        )
+
+    low_rows = ""
+    for e in sorted(entry_list, key=lambda r: r.get("fulfillment") if r.get("fulfillment") is not None else 1.0)[:10]:
+        if e.get("fulfillment") is None:
+            continue
+        low_rows += (
+            f"<tr><td class='num'>{float(e.get('fulfillment') or 0.0):.3f}</td>"
+            f"<td>{html.escape(e.get('activity') or 'research')}</td>"
+            f"<td><a href='{html.escape(_md_to_html_href(e.get('path') or ''))}'>"
+            f"{html.escape((e.get('seed') or '')[:90])}</a></td></tr>\n"
+        )
+
+    body = f"""
+<p class="meta-line">Operational view of the journal: reward, activity mix, user ratings, and weak spots.</p>
+{f'<p class="meta-line" style="color:var(--accent)">Profile note: {stale}</p>' if stale else ''}
+<div class="dashboard-grid">{card_html}</div>
+<h2 class="section-title">Activity health</h2>
+<table class="stats-table">
+  <thead><tr><th>Activity</th><th>Count</th><th>Mean dopamine</th></tr></thead>
+  <tbody>{activity_rows or '<tr><td colspan="3">No activity data</td></tr>'}</tbody>
+</table>
+<h2 class="section-title">Lowest fulfillment</h2>
+<table class="stats-table">
+  <thead><tr><th>Fulfillment</th><th>Activity</th><th>Brief</th></tr></thead>
+  <tbody>{low_rows or '<tr><td colspan="3">No fulfillment data yet</td></tr>'}</tbody>
+</table>
+"""
+    out = out_dir / "dashboard.html"
+    out.write_text(_page("Dashboard", "dashboard", body, wide=True), encoding="utf-8")
     return out
 
 
@@ -620,6 +744,7 @@ def _page(
     extra_head: str = "",
 ) -> str:
     nav_items = [
+        ("dashboard", "Dashboard", "dashboard.html"),
         ("index", "Index", "index.html"),
         ("today", "Today", "today.html"),
         ("tree", "Tree", "tree.html"),
