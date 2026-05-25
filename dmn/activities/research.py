@@ -22,7 +22,7 @@ from dmn.loop import (
     parse_synthesis,
     plan_tools,
 )
-from dmn.seeds import Seed
+from dmn.seeds import Seed, search_query
 from dmn.tools import ResearchItem
 
 SKIP_FULFILLMENT_THRESHOLD = 0.15
@@ -73,8 +73,13 @@ class ResearchActivity:
         return True
 
     def run(self, seed: Seed, ctx: ActivityContext) -> ActivityResult:
+        # Plan tools against the full question (the planner reads natural language fine),
+        # but search with keywords — the conversational phrasing wrecks search relevance.
+        query = (seed.query or "").strip() or search_query(
+            seed.text, subtopic=seed.subtopic
+        )
         plan = plan_tools(seed.text, ctx.llm, ctx.dry_run, ctx.rng)
-        items = execute_tools(plan, seed.text, verbose=ctx.verbose)
+        items = execute_tools(plan, query, verbose=ctx.verbose)
         scored: list[tuple[float, dict, ResearchItem]] = []
         item_totals: list[float] = []
         alignments: list[float] = []
@@ -117,7 +122,7 @@ class ResearchActivity:
                         f"[yellow]  low fulfillment ({fulfillment:.2f}); "
                         f"retrying with {retry_tool}[/]"
                     )
-                retry_items = execute_tools([retry_tool], seed.text, verbose=ctx.verbose)
+                retry_items = execute_tools([retry_tool], query, verbose=ctx.verbose)
                 if retry_items:
                     retry_scored, retry_totals, retry_alignments = _score_items(
                         retry_items, ctx

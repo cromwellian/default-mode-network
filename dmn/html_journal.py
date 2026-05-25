@@ -409,6 +409,31 @@ def write_brief_html(md_path: Path, journal_dir: Path | str = JOURNAL_DIR) -> Pa
     return html_path
 
 
+def write_report_html(md_path: Path, journal_dir: Path | str = JOURNAL_DIR) -> Path:
+    """Render a run report markdown file to HTML (and update the `report.html` alias)."""
+    md_path = Path(md_path)
+    out_dir = Path(journal_dir)
+    html_path = out_dir / (md_path.stem + ".html")
+    body = md_path.read_text(encoding="utf-8")
+    # Drop the leading H1 (we render it as the page header) but keep the rest.
+    title = "Wander report"
+    for line in body.splitlines():
+        if line.startswith("# "):
+            title = line[2:].strip()
+            break
+    body_html = _md_to_html(body, md_path)
+    page = _page(
+        title=title,
+        nav_active="report",
+        wide=True,
+        body=f'<article class="brief-body report">{body_html}</article>',
+    )
+    html_path.write_text(page, encoding="utf-8")
+    # Latest-report alias so the nav link is stable.
+    (out_dir / "report.html").write_text(page, encoding="utf-8")
+    return html_path
+
+
 def write_index_html(
     entries: Iterable[dict], journal_dir: Path | str = JOURNAL_DIR
 ) -> Path:
@@ -598,6 +623,7 @@ def _page(
         ("index", "Index", "index.html"),
         ("today", "Today", "today.html"),
         ("tree", "Tree", "tree.html"),
+        ("report", "Report", "report.html"),
     ]
     nav_html = "".join(
         f'<a href="{href}" class="{"active" if key == nav_active else ""}">{label}</a>'

@@ -1,0 +1,246 @@
+"""NotebookLM-style run report: a rich, narrated overview of one wander session.
+
+Given a run_id, gathers that session's briefs (dopamine, activities, grounding sources,
+entities, rabbit holes, artifacts) and asks the LLM to synthesize:
+  - an Overview that weaves the session's themes and standout findings together,
+  - a two-voice Discussion (Host ↔ DMN, the wandering mind) exploring the surprises,
+  - Threads to pull next.
+
+It then appends a deterministic Findings index (links to each brief + the real sources it
+consumed) and an Artifacts section (web apps embedded via iframe in the HTML view). Writes
+`journal/report-<run_id>.md`; `dmn.html_journal.write_report_html` renders the HTML twin.
+"""
+from __future__ import annotations
+
+import collections
+import datetime as dt
+from pathlib import Path
+from typing import Optional
+
+from dmn import store
+from dmn.journal import JOURNAL_DIR
+
+_SYSTEM = (
+    "You are the narrator of a 'default mode network' — an AI mind that spent a session "
+    "wandering the user's interests, reading real sources, and making things. Write a "
+    "NotebookLM-style overview of the session for the user to read over coffee. Be "
+    "specific and grounded: lean on the actual findings and the real sources they "
+    "consumed, surface non-obvious connections between findings, and keep a warm, curious "
+    "voice. Do NOT invent findings that aren't listed.\n\n"
+    "Output exactly these markdown sections, in order:\n"
+    "## Overview\n"
+    "(500-800 words synthesizing the session — its through-lines, the 2-3 standout "
+    "findings, and what was surprising. Refer to findings by their title.)\n\n"
+    "## The discussion\n"
+    "(A lively 8-12 turn dialogue between **Host:** — a sharp, curious generalist — and "
+    "**DMN:** — the wandering mind explaining what it found and why it chased it. Make it "
+    "feel like the NotebookLM audio overview: conversational, building on each other, "
+    "drawing out the most interesting cross-connections. Reference findings by title.)\n\n"
+    "## Threads to pull next\n"
+    "(4-7 bullets — the most promising unexplored directions.)"
+)
+
+
+def _read_body_snippet(path: Optional[str], limit: int = 400) -> str:
+    if not path:
+        return ""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except Exception:
+        return ""
+    # strip YAML frontmatter
+    if text.startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) >= 3:
+            text = parts[2]
+    lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
+    # skip leading markdown headings / the 'Seed:' echo
+    body = " ".join(
+        ln for ln in lines if not ln.startswith("#") and not ln.lower().startswith("**seed:")
+    )
+    return body[:limit]
+
+
+def _grounding_str(brief: dict, limit: int = 4) -> str:
+    refs = brief.get("grounding") or []
+    if not refs:
+        return ""
+    parts = []
+    for r in refs[:limit]:
+        src = r.get("source") or "?"
+        title = (r.get("title") or "").strip()
+        parts.append(f"{src}: {title}" if title else src)
+    return "; ".join(parts)
+
+
+def _meaningful_briefs(briefs: list[dict]) -> list[dict]:
+    """Briefs worth reporting on: drop pruned/skipped, sort by dopamine."""
+    out = [
+        b
+        for b in briefs
+        if (b.get("status") != "pruned") and (b.get("dopamine_total") is not None)
+    ]
+    out.sort(key=lambda b: b.get("dopamine_total") or 0.0, reverse=True)
+    return out
+
+
+def _digest(briefs: list[dict], limit: int = 12) -> str:
+    lines: list[str] = []
+    for i, b in enumerate(briefs[:limit], 1):
+        title = (b.get("seed") or "?").strip().replace("\n", " ")
+        act = b.get("activity") or "research"
+        dop = b.get("dopamine_total") or 0.0
+        lines.append(f"[{i}] ({act}, dopamine {dop:.3f}) {title}")
+        g = _grounding_str(b)
+        if g:
+            lines.append(f"     grounded in: {g}")
+        snippet = _read_body_snippet(b.get("path"))
+        if snippet:
+            lines.append(f"     summary: {snippet}")
+        rh = b.get("rabbit_holes") or []
+        if rh:
+            lines.append(f"     rabbit holes: {'; '.join(rh[:3])}")
+    return "\n".join(lines)
+
+
+def _fallback_narrative(briefs: list[dict]) -> str:
+    """Deterministic narrative when no real LLM is available (stub / dry-run)."""
+    top = briefs[:5]
+    bullets = "\n".join(
+        f"- **{(b.get('seed') or '?')[:80]}** ({b.get('activity')}, dopamine "
+        f"{(b.get('dopamine_total') or 0.0):.3f})"
+        for b in top
+    )
+    rabbit = []
+    for b in briefs:
+        rabbit.extend(b.get("rabbit_holes") or [])
+    rabbit = list(dict.fromkeys(rabbit))[:6]
+    threads = "\n".join(f"- {r}" for r in rabbit) or "- (none surfaced)"
+    return (
+        "## Overview\n\n"
+        "This session's strongest findings, by dopamine:\n\n"
+        f"{bullets}\n\n"
+        "_(Narrative overview is generated by the configured LLM; this is the offline "
+        "fallback.)_\n\n"
+        "## The discussion\n\n"
+        "_(Requires an LLM provider — set DMN_LLM_PROVIDER to generate the narrated "
+        "discussion.)_\n\n"
+        "## Threads to pull next\n\n"
+        f"{threads}"
+    )
+
+
+def _narrative(llm, briefs: list[dict]) -> str:
+    if llm is None or getattr(llm, "name", "stub") == "stub":
+        return _fallback_narrative(briefs)
+    activities = collections.Counter(b.get("activity") for b in briefs)
+    best = max((b.get("dopamine_total") or 0.0 for b in briefs), default=0.0)
+    header = (
+        f"Session digest: {len(briefs)} briefs · activities "
+        f"{dict(activities)} · best dopamine {best:.3f}\n\n"
+        f"Findings (most interesting first):\n{_digest(briefs)}\n\n"
+        "Write the report now."
+    )
+    try:
+        resp = llm.complete(system=_SYSTEM, user=header, max_tokens=4000)
+        text = (resp.text or "").strip()
+    except Exception:
+        text = ""
+    return text or _fallback_narrative(briefs)
+
+
+def _findings_index(briefs: list[dict], limit: int = 15) -> str:
+    lines = ["## Findings", ""]
+    for b in briefs[:limit]:
+        stem = Path(b.get("path") or "").stem
+        href = f"{stem}.html" if stem else "#"
+        title = (b.get("seed") or "?").strip()
+        dop = b.get("dopamine_total") or 0.0
+        act = b.get("activity") or "research"
+        lines.append(f"### [{title}]({href})")
+        lines.append(f"_{act} · dopamine {dop:.3f}_  ")
+        g = _grounding_str(b, limit=6)
+        if g:
+            lines.append(f"**Grounded in:** {g}  ")
+        snippet = _read_body_snippet(b.get("path"), limit=300)
+        if snippet:
+            lines.append(snippet)
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _artifacts_section(briefs: list[dict]) -> str:
+    """Embed web apps (iframe) and link code/plots. Paths are repo-root-relative; the HTML
+    renderer rewrites them for the journal/ directory."""
+    web_apps: list[tuple[str, str]] = []
+    others: list[tuple[str, str]] = []
+    for b in briefs:
+        for p in b.get("artifact_paths") or []:
+            title = (b.get("seed") or Path(p).stem)[:70]
+            if p.endswith("index.html"):
+                web_apps.append((title, p))
+            elif p.endswith((".py", ".png")):
+                others.append((title, p))
+    if not web_apps and not others:
+        return ""
+    out = ["## Artifacts", ""]
+    for title, p in web_apps:
+        out.append(f"**{title}** — [open]({p})")
+        out.append(
+            f'<iframe src="{p}" style="width:100%;height:460px;border:1px solid #3b342d;'
+            'border-radius:10px;background:#fff" loading="lazy"></iframe>'
+        )
+        out.append("")
+    for title, p in others:
+        kind = "plot" if p.endswith(".png") else "code"
+        out.append(f"- {kind}: [{title}]({p})")
+    return "\n".join(out)
+
+
+def build_run_report(
+    conn,
+    run_id: str,
+    *,
+    llm=None,
+    journal_dir: Path | str = JOURNAL_DIR,
+) -> Optional[Path]:
+    """Build journal/report-<run_id>.md for one wander session. Returns the path or None."""
+    briefs = _meaningful_briefs(store.list_journal_by_run(conn, run_id, limit=1000))
+    if not briefs:
+        return None
+    out_dir = Path(journal_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    activities = collections.Counter(b.get("activity") for b in briefs)
+    sources = collections.Counter(
+        r.get("source") for b in briefs for r in (b.get("grounding") or [])
+    )
+    best = max((b.get("dopamine_total") or 0.0 for b in briefs), default=0.0)
+    when = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    header = [
+        f"# Wander report — {when}",
+        "",
+        f"_{len(briefs)} findings · best dopamine {best:.3f} · run `{run_id}`_  ",
+        f"**Activities:** {', '.join(f'{k}×{v}' for k, v in activities.most_common())}  ",
+    ]
+    if sources:
+        header.append(
+            f"**Sources consumed:** "
+            f"{', '.join(f'{k}×{v}' for k, v in sources.most_common())}  "
+        )
+    header.append("")
+
+    parts = [
+        "\n".join(header),
+        _narrative(llm, briefs),
+        "",
+        _artifacts_section(briefs),
+        "",
+        _findings_index(briefs),
+    ]
+    md = "\n".join(p for p in parts if p).strip() + "\n"
+
+    md_path = out_dir / f"report-{run_id}.md"
+    md_path.write_text(md, encoding="utf-8")
+    return md_path

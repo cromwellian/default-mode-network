@@ -18,6 +18,12 @@ from dmn.activities._helpers import (
     write_artifact_dir,
 )
 from dmn.generators import Artifact
+from dmn.grounding import (
+    gather_grounding,
+    grounding_block,
+    grounding_footer,
+    grounding_fulfillment,
+)
 from dmn.journal import JOURNAL_DIR
 from dmn.paths import artifact_href_for_journal
 from dmn.sandbox import run_python
@@ -40,6 +46,7 @@ def _system_for_budget(code_budget: str) -> str:
 
 USER_TEMPLATE = (
     "Seed: {seed_text}\n\n"
+    "{grounding}\n\n"
     "1. Pick ONE algorithm or technique adjacent to this seed. Name it clearly.\n"
     "2. Write a runnable demo script that illustrates it ({budget_note}, stdlib + numpy, "
     "matplotlib optional).\n"
@@ -146,7 +153,8 @@ class AlgorithmExploreActivity:
                     )
                 )
 
-        body = self._render_body(seed, code, meta, commentary, execution, out_dir)
+        refs = gather_grounding(seed, ctx)
+        body = self._render_body(seed, code, meta, commentary, execution, out_dir) + grounding_footer(refs)
         return ActivityResult(
             title=meta.get("algorithm") or f"Algorithm: {seed.text[:60]}",
             body_md=body,
@@ -157,26 +165,34 @@ class AlgorithmExploreActivity:
                 "why_interesting": meta.get("why_interesting"),
                 "complexity": meta.get("complexity"),
                 "lines": len(code.splitlines()),
+                "fulfillment": grounding_fulfillment(refs),
+                "grounding": [
+                    {"title": r.title, "url": r.url, "source": r.source} for r in refs
+                ],
             },
             execution=execution,
         )
 
     def _gen(self, seed: Seed, ctx: ActivityContext) -> tuple[str, dict, str]:
         try:
-            max_tokens = 3500 if ctx.code_budget == "medium" else 5000 if ctx.code_budget == "large" else 2000
+            max_tokens = 8000 if ctx.code_budget == "medium" else 12000 if ctx.code_budget == "large" else 3000
             budget_note = {
                 "medium": "up to about 250 lines",
                 "large": "up to about 350 lines",
             }.get(ctx.code_budget, "≤80 lines")
             resp = ctx.llm.complete(
                 system=_system_for_budget(ctx.code_budget),
-                user=USER_TEMPLATE.format(seed_text=seed.text, budget_note=budget_note),
+                user=USER_TEMPLATE.format(
+                    seed_text=seed.text,
+                    budget_note=budget_note,
+                    grounding=grounding_block(gather_grounding(seed, ctx)),
+                ),
                 max_tokens=max_tokens,
             )
             text = (resp.text or "").strip()
         except Exception:
             text = ""
-        code = extract_fenced(text, "python")
+        code = extract_fenced(text, "python", salvage=True)
         meta = extract_json_meta(text)
         commentary = ""
         if code:

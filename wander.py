@@ -18,6 +18,7 @@ import random
 import sys
 import time
 import uuid
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -37,6 +38,7 @@ from dmn import activities as acts
 from dmn import embeddings as emb
 from dmn import generators as gens
 from dmn import html_journal, journal, seeds, store, taste, tree
+from dmn import report as report_mod
 from dmn.activities import ActivityContext, ActivityResult
 from dmn.llm import get_llm
 from dmn.loop import available_tools_for
@@ -166,6 +168,21 @@ def main(
         "--min-improvement",
         help="Minimum best-score delta that resets --patience.",
     ),
+    explore: float = typer.Option(
+        0.05,
+        "--explore",
+        help="UCB exploration weight for frontier selection (0 = pure best-first/greedy).",
+    ),
+    ground: bool = typer.Option(
+        True,
+        "--ground/--no-ground",
+        help="Consume external references before creation activities riff (code/app/web/algo/ml).",
+    ),
+    report: bool = typer.Option(
+        True,
+        "--report/--no-report",
+        help="Write a NotebookLM-style narrated overview of the session to journal/report.html.",
+    ),
     code_budget: str = typer.Option(
         "small",
         "--code-budget",
@@ -236,6 +253,7 @@ def main(
         verbose=verbose,
         timeout_s=_code_timeout(code_budget),
         code_budget=code_budget,
+        ground=ground,
     )
     store.start_run(
         conn,
@@ -258,6 +276,19 @@ def main(
     patience_restarts = 0
     patience_triggered = False
     beam_pruned_count = 0
+
+    # Root seeds cycle through clusters ordered for maximal spread, so a session covers
+    # many themes instead of collapsing onto the heaviest cluster.
+    root_pool = _diverse_root_clusters(clusters, rng)
+    _root_focus_idx = 0
+
+    def _next_root_focus() -> Optional[dict]:
+        nonlocal _root_focus_idx
+        if not root_pool:
+            return None
+        c = root_pool[_root_focus_idx % len(root_pool)]
+        _root_focus_idx += 1
+        return c
 
     if resume:
         for node in store.list_open_frontier(conn):
@@ -283,7 +314,7 @@ def main(
             root_seed = (
                 seeds.Seed(text=seed_text, source="manual")
                 if (seed_text and i == 0)
-                else _pick_root_seed(clusters, llm, rng)
+                else _pick_root_seed(clusters, llm, rng, focus_cluster=_next_root_focus())
             )
             child_id, score, _ = _expand_brief(
                 conn=conn,
@@ -344,7 +375,7 @@ def main(
             console.print("[yellow]patience triggered; restarting from a fresh root[/]")
             patience_restarts += 1
             stale_expansions = 0
-            root_seed = _pick_root_seed(clusters, llm, rng)
+            root_seed = _pick_root_seed(clusters, llm, rng, focus_cluster=_next_root_focus())
             child_id, score, _ = _expand_brief(
                 conn=conn,
                 chosen_seed=root_seed,
@@ -381,7 +412,7 @@ def main(
             if iterations is not None and n_done >= iterations:
                 break
             console.print("[dim]restarting from fresh cluster-seeded root[/]")
-            root_seed = _pick_root_seed(clusters, llm, rng)
+            root_seed = _pick_root_seed(clusters, llm, rng, focus_cluster=_next_root_focus())
             child_id, score, _ = _expand_brief(
                 conn=conn,
                 chosen_seed=root_seed,
@@ -418,7 +449,7 @@ def main(
                 )
             continue
 
-        node_summary = frontier.pop_best()
+        node_summary = frontier.pop_best(total_iters=max(2, n_done), explore_c=explore)
         if node_summary is None:
             continue
         parent_id = int(node_summary["id"])
@@ -536,6 +567,15 @@ def main(
     journal.write_today_notebook(entries)
     html_journal.build_html_journal(entries, session_nodes=session_nodes)
 
+    report_path = None
+    if report:
+        try:
+            report_path = report_mod.build_run_report(conn, run_id, llm=llm)
+            if report_path:
+                html_journal.write_report_html(report_path)
+        except Exception as e:
+            console.print(f"[yellow]report generation failed: {e}[/]")
+
     pruned_count = sum(1 for n in session_nodes if n.get("status") == "pruned")
     leaf_count = sum(1 for n in session_nodes if n.get("status") == "leaf")
     open_count = sum(1 for n in session_nodes if n.get("status") == "open")
@@ -546,6 +586,8 @@ def main(
         f"patience_triggered={patience_triggered}. "
         f"Tree → [dim]journal/tree.html[/]"
     )
+    if report_path:
+        console.print(f"[bold]Report →[/] [dim]journal/{Path(report_path).stem}.html[/] (journal/report.html)")
     store.finish_run(
         conn,
         run_id,
@@ -561,8 +603,58 @@ def main(
 # ----- Helpers ---------------------------------------------------------------
 
 
-def _pick_root_seed(clusters: list[dict], llm, rng: random.Random) -> seeds.Seed:
-    """Sample a root seed using cluster-grounded strategies (no drift — drift wants a parent)."""
+def _diverse_root_clusters(clusters: list[dict], rng: random.Random) -> list[dict]:
+    """Order non-noise clusters for maximal topical spread (farthest-point sampling).
+
+    Mass-weighted sampling sends every root into the dominant cluster, so a whole session
+    collapses onto one theme. Cycling roots through this ordering instead makes them span
+    the taste profile: start at the heaviest cluster, then repeatedly add the cluster most
+    distant (lowest cosine) from those already chosen.
+    """
+    pool = [c for c in clusters if not c.get("is_noise") and c.get("centroid") is not None]
+    if len(pool) <= 1:
+        return list(pool) or list(clusters)
+
+    def _mass(c: dict) -> float:
+        m = (c.get("meta") or {}).get("cluster_mass")
+        return float(m) if m is not None else float(c.get("n_members") or 1)
+
+    def _unit(c: dict) -> np.ndarray:
+        v = np.asarray(c["centroid"], dtype=np.float32)
+        n = float(np.linalg.norm(v))
+        return v / n if n > 0 else v
+
+    units = {id(c): _unit(c) for c in pool}
+    ordered = [max(pool, key=_mass)]
+    remaining = [c for c in pool if c is not ordered[0]]
+    while remaining:
+        nxt = max(
+            remaining,
+            key=lambda c: min(
+                1.0 - float(np.dot(units[id(c)], units[id(s)])) for s in ordered
+            ),
+        )
+        ordered.append(nxt)
+        remaining.remove(nxt)
+    return ordered
+
+
+def _pick_root_seed(
+    clusters: list[dict],
+    llm,
+    rng: random.Random,
+    focus_cluster: Optional[dict] = None,
+) -> seeds.Seed:
+    """Sample a root seed using cluster-grounded strategies (no drift — drift wants a parent).
+
+    When `focus_cluster` is given, seed from that specific cluster so successive roots span
+    distinct themes instead of all converging on the heaviest cluster.
+    """
+    if focus_cluster is not None:
+        pool = [focus_cluster]
+        if rng.random() < 0.5:
+            return seeds.cold_start(pool, rng)
+        return seeds.cluster_sample(pool, llm, rng)
     pick = rng.random()
     if pick < 0.45 or not clusters:
         return seeds.cold_start(clusters, rng)
@@ -701,6 +793,9 @@ def _expand_brief(
         expanded_count=0,
         activity_budget=activity_budget,
         cost_seconds=time.time() - node_started,
+        fulfillment=result.metadata.get("fulfillment"),
+        fulfillment_breakdown=result.metadata.get("fulfillment_breakdown"),
+        grounding=result.metadata.get("grounding"),
     )
     store.add_finding(
         conn, chosen_seed.text + " :: " + result.body_md[:200], brief_emb

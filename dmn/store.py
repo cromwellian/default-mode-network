@@ -80,7 +80,7 @@ def _vec_from_json(s: Optional[str]) -> Optional[np.ndarray]:
     return np.asarray(json.loads(s), dtype=np.float32)
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -92,6 +92,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     v5: journal activity columns (activity, artifact_paths, execution_result)
     v6: HDBSCAN medoids, cluster_method, is_noise, interests.last_seen
     v7: run/session identity + journal metrics
+    v8: fulfillment + grounding references persisted on the journal row
     """
     for sql in [
         # v2
@@ -122,6 +123,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "ALTER TABLE journal ADD COLUMN last_improvement REAL",
         "ALTER TABLE journal ADD COLUMN activity_budget TEXT",
         "ALTER TABLE journal ADD COLUMN cost_seconds REAL",
+        # v8 — reward + grounding provenance
+        "ALTER TABLE journal ADD COLUMN fulfillment REAL",
+        "ALTER TABLE journal ADD COLUMN fulfillment_breakdown TEXT",
+        "ALTER TABLE journal ADD COLUMN grounding TEXT",
     ]:
         try:
             conn.execute(sql)
@@ -312,7 +317,8 @@ _JOURNAL_COLUMNS = (
     "id, seed, seed_source, tools, dopamine_total, dopamine_breakdown, "
     "path, embedding, created_at, parent_id, mutation, depth, status, "
     "subtree_score, entities, rabbit_holes, activity, artifact_paths, execution_result, "
-    "run_id, visit_count, expanded_count, last_improvement, activity_budget, cost_seconds"
+    "run_id, visit_count, expanded_count, last_improvement, activity_budget, cost_seconds, "
+    "fulfillment, fulfillment_breakdown, grounding"
 )
 
 
@@ -344,6 +350,9 @@ def _row_to_journal(row: tuple) -> dict:
         "last_improvement": row[22],
         "activity_budget": row[23],
         "cost_seconds": row[24],
+        "fulfillment": row[25],
+        "fulfillment_breakdown": json.loads(row[26]) if row[26] else {},
+        "grounding": json.loads(row[27]) if row[27] else [],
     }
 
 
@@ -370,6 +379,9 @@ def add_journal(
     last_improvement: Optional[float] = None,
     activity_budget: Optional[str] = None,
     cost_seconds: Optional[float] = None,
+    fulfillment: Optional[float] = None,
+    fulfillment_breakdown: Optional[dict] = None,
+    grounding: Optional[list] = None,
 ) -> int:
     """Record a brief in the journal index; returns its row id.
 
@@ -388,13 +400,18 @@ def add_journal(
     rabbit_holes_json = json.dumps(rabbit_holes) if rabbit_holes else None
     artifact_paths_json = json.dumps(artifact_paths) if artifact_paths else None
     execution_json = json.dumps(execution_result) if execution_result else None
+    fulfillment_breakdown_json = (
+        json.dumps(fulfillment_breakdown) if fulfillment_breakdown else None
+    )
+    grounding_json = json.dumps(grounding) if grounding else None
     cur = conn.execute(
         "INSERT INTO journal(seed, seed_source, tools, dopamine_total, "
         "dopamine_breakdown, path, embedding, created_at, "
         "parent_id, mutation, depth, status, subtree_score, entities, rabbit_holes, "
         "activity, artifact_paths, execution_result, run_id, visit_count, expanded_count, "
-        "last_improvement, activity_budget, cost_seconds) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "last_improvement, activity_budget, cost_seconds, "
+        "fulfillment, fulfillment_breakdown, grounding) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             seed,
             seed_source,
@@ -420,6 +437,9 @@ def add_journal(
             last_improvement,
             activity_budget,
             cost_seconds,
+            fulfillment,
+            fulfillment_breakdown_json,
+            grounding_json,
         ),
     )
     conn.commit()

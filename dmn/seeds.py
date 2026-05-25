@@ -19,11 +19,73 @@ SERENDIPITY_NOISE_PROB = 0.05
 
 @dataclass
 class Seed:
-    """A research seed: text, the strategy that produced it, and the subtopic (if any) used."""
+    """A research seed.
+
+    `text` is the conversational question the LLM synthesizes against (e.g. "What's a
+    fresh angle on contrarian nutrition science?"). `query` is the keyword form handed to
+    search APIs — search engines latch onto "what" and return dictionary/WhatsApp junk if
+    fed the question verbatim, so generators populate `query` with clean keywords. When
+    `query` is empty (e.g. tree-mutation seeds), `search_query()` derives one from `text`.
+    """
 
     text: str
     source: str  # 'cold' | 'cluster' | 'cross' | 'drift' | 'trending' | 'manual'
     subtopic: Optional[str] = None
+    query: Optional[str] = None
+
+
+# Templated question scaffolding emitted by the generators below; stripped (longest-first)
+# so the search query keeps only the topic. The LLM-authored questions don't match these
+# exactly, so we also strip leading interrogative tokens afterwards.
+_SEARCH_STRIP_PREFIXES = (
+    "what's an unanswered question in",
+    "what is an unanswered question in",
+    "what is the deeper story behind",
+    "what's the deeper story behind",
+    "what's a fresh angle on",
+    "what is a fresh angle on",
+    "adjacent to:",
+)
+
+# Leading tokens that carry no search signal; dropped one at a time off the front.
+_LEADING_QUESTION_TOKENS = {
+    "what", "what's", "whats", "how", "why", "is", "are", "does", "do",
+    "can", "could", "would", "should", "when", "where", "who", "which",
+    "the", "a", "an",
+}
+
+
+def search_query(
+    text: str,
+    *,
+    subtopic: Optional[str] = None,
+    fallback: Optional[str] = None,
+) -> str:
+    """Turn a conversational seed question into keywords suitable for search APIs.
+
+    Strips templated scaffolding ("What's a fresh angle on ..."), surrounding quotes, and
+    leading interrogative tokens, leaving the topical content words. Falls back to
+    `subtopic`, then `fallback`, then the lightly-cleaned text if the result is too short.
+    """
+    raw = (text or "").strip()
+    q = raw.strip("?.! ").strip()
+    low = q.lower()
+    for pref in _SEARCH_STRIP_PREFIXES:
+        if low.startswith(pref):
+            q = q[len(pref):].strip()
+            break
+    q = q.replace("'", "").replace('"', "").replace("↔", " ")
+    tokens = q.split()
+    while tokens and tokens[0].lower().strip(",:;-") in _LEADING_QUESTION_TOKENS:
+        tokens.pop(0)
+    q = " ".join(tokens).strip(" ,:;-")
+    if len(q) >= 3:
+        return q
+    if subtopic and subtopic.strip():
+        return subtopic.strip()
+    if fallback and fallback.strip():
+        return fallback.strip()
+    return raw
 
 
 def _theme(cluster: dict) -> str:
@@ -80,13 +142,20 @@ def cold_start(clusters: list[dict], rng: random.Random) -> Seed:
         return Seed(
             text="What's something the world is currently underestimating?",
             source="cold",
+            query="underestimated ideas",
         )
     c = _weighted_cluster_choice(eligible, rng)
     subs = _subtopics(c)
     if subs:
         st = rng.choice(subs)
-        return Seed(text=f"What's a fresh angle on {st}?", source="cold", subtopic=st)
-    return Seed(text=f"What's a fresh angle on {_theme(c)}?", source="cold")
+        return Seed(
+            text=f"What's a fresh angle on {st}?",
+            source="cold",
+            subtopic=st,
+            query=st,
+        )
+    theme = _theme(c)
+    return Seed(text=f"What's a fresh angle on {theme}?", source="cold", query=theme)
 
 
 def cluster_sample(clusters: list[dict], llm, rng: random.Random) -> Seed:
@@ -115,7 +184,12 @@ def cluster_sample(clusters: list[dict], llm, rng: random.Random) -> Seed:
         if qs
         else f"What's an unanswered question in '{theme}'?"
     )
-    return Seed(text=text, source="cluster", subtopic=subtopic or None)
+    return Seed(
+        text=text,
+        source="cluster",
+        subtopic=subtopic or None,
+        query=search_query(text, subtopic=subtopic, fallback=theme),
+    )
 
 
 def cross_pollinate(clusters: list[dict], llm, rng: random.Random) -> Seed:
@@ -146,7 +220,15 @@ def cross_pollinate(clusters: list[dict], llm, rng: random.Random) -> Seed:
         if qs
         else f"How do '{la}' and '{lb}' speak to each other?"
     )
-    return Seed(text=text, source="cross", subtopic=(sa or sb) or None)
+    # Cross-pollination questions weave two themes together, so the cleaned question rarely
+    # makes a good keyword query. Search the two themes (plus any subtopics) directly.
+    cross_query = " ".join([p for p in (la, lb, *sub_clauses) if p]).strip()
+    return Seed(
+        text=text,
+        source="cross",
+        subtopic=(sa or sb) or None,
+        query=cross_query or None,
+    )
 
 
 def _moderate_distance_pair(
@@ -228,7 +310,12 @@ def drift(recent_briefs: list[dict], llm, rng: random.Random) -> Seed:
         text = resp.text.strip().split("\n")[0]
     except Exception:
         text = ""
-    return Seed(text=text or f"Adjacent to: {seed_text}", source="drift")
+    text = text or f"Adjacent to: {seed_text}"
+    return Seed(
+        text=text,
+        source="drift",
+        query=search_query(text, fallback=search_query(seed_text)),
+    )
 
 
 def trending_meets_taste(centroids, embed_fn, rng: random.Random) -> Optional[Seed]:
@@ -257,7 +344,9 @@ def trending_meets_taste(centroids, embed_fn, rng: random.Random) -> Optional[Se
     best_idx = int(sims.argmax())
     chosen = items[best_idx]
     return Seed(
-        text=f"What is the deeper story behind: {chosen.title}", source="trending"
+        text=f"What is the deeper story behind: {chosen.title}",
+        source="trending",
+        query=chosen.title,
     )
 
 

@@ -57,6 +57,9 @@ def _register_all() -> None:
         "youtube",
         "wikimedia",
         "musicbrainz",
+        "github",
+        "huggingface",
+        "rss",
     ]:
         try:
             m = import_module(f"dmn.tools.{mod}")
