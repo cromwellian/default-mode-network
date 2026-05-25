@@ -21,12 +21,24 @@ if TYPE_CHECKING:  # avoid a circular import at runtime
 
 # Preferred grounding sources, in priority order. We use a fixed sweep rather than the
 # LLM tool-planner: grounding wants breadth (what's out there) and skipping the planner
-# call keeps the extra cost to the searches themselves.
-_PREFERRED = ["wikipedia", "arxiv", "semantic_scholar", "websearch", "hackernews", "reddit"]
+# call keeps the extra cost to the searches themselves. The mix spans reference
+# (wikipedia/arxiv), code/projects (github), models (huggingface), community (hackernews),
+# and live news (rss/techmeme) so a brief is informed by both the canon and what's rising.
+_PREFERRED = [
+    "wikipedia",
+    "arxiv",
+    "github",
+    "huggingface",
+    "hackernews",
+    "rss",
+    "semantic_scholar",
+    "websearch",
+    "reddit",
+]
 
 
 def gather_grounding(
-    seed: Seed, ctx: "ActivityContext", *, max_items: int = 6, max_tools: int = 4
+    seed: Seed, ctx: "ActivityContext", *, max_items: int = 8, max_tools: int = 6
 ) -> list[ResearchItem]:
     """Search reliable sources for real references related to `seed`. Cached per query.
 

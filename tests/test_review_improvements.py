@@ -205,6 +205,35 @@ class GroundingTests(unittest.TestCase):
         self.assertLess(g.grounding_fulfillment([]), 0.85)  # ungrounded penalized
 
 
+class NewSourceTests(unittest.TestCase):
+    """New grounding sources (github / huggingface / rss) register and behave."""
+
+    def test_new_tools_registered(self):
+        from dmn.tools import available
+        for name in ("github", "huggingface", "rss"):
+            self.assertIn(name, available())
+
+    def test_grounding_prefers_new_sources(self):
+        import dmn.grounding as g
+        for name in ("github", "huggingface", "rss"):
+            self.assertIn(name, g._PREFERRED)
+
+    def test_rss_query_ranks_by_keyword_overlap(self):
+        import dmn.tools.rss as rss
+        from dmn.tools import ResearchItem
+        items = [
+            ResearchItem(title="Quantum error correction milestone", summary="qubits",
+                         url="u1", source="rss:quanta"),
+            ResearchItem(title="New LLM reasoning benchmark released", summary="llm eval",
+                         url="u2", source="rss:techmeme"),
+        ]
+        rss._CACHE["items"] = items
+        rss._CACHE["ts"] = 2**40  # force cache hit, no network
+        top = rss.search("llm benchmark", max_results=1)
+        self.assertEqual(len(top), 1)
+        self.assertIn("LLM", top[0].title)
+
+
 class FencedExtractionTests(unittest.TestCase):
     """Guards for the 'always the same dry-run app' bug: truncated output must not yield
     None (which made callers fall back to a canned stub)."""
