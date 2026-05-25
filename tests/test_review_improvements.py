@@ -234,6 +234,73 @@ class NewSourceTests(unittest.TestCase):
         self.assertIn("LLM", top[0].title)
 
 
+class StorePersistenceTests(unittest.TestCase):
+    """v8: grounding refs + fulfillment must round-trip through the journal store."""
+
+    def test_grounding_and_fulfillment_roundtrip(self):
+        import tempfile
+        from dmn import store
+        c = store.connect(tempfile.mktemp(suffix=".sqlite"))
+        jid = store.add_journal(
+            c, "seed", "cold", ["wikipedia"], {"total": 0.5}, "/tmp/x.md",
+            activity="code_sketch", fulfillment=1.0,
+            fulfillment_breakdown={"count_score": 1.0},
+            grounding=[{"title": "Bandit Book", "url": "http://x", "source": "github"}],
+        )
+        row = store.get_journal(c, jid)
+        self.assertEqual(row["fulfillment"], 1.0)
+        self.assertEqual(row["grounding"][0]["source"], "github")
+        self.assertEqual(row["fulfillment_breakdown"]["count_score"], 1.0)
+
+
+class SeedDiversityTests(unittest.TestCase):
+    """Roots should span clusters, not collapse onto the heaviest one."""
+
+    def test_diverse_root_ordering(self):
+        from wander import _diverse_root_clusters
+        clusters = [
+            {"id": 0, "is_noise": False, "centroid": [1, 0, 0], "n_members": 100},
+            {"id": 1, "is_noise": False, "centroid": [0.99, 0.14, 0], "n_members": 80},
+            {"id": 2, "is_noise": False, "centroid": [0, 1, 0], "n_members": 10},
+            {"id": 3, "is_noise": False, "centroid": [0, 0, 1], "n_members": 5},
+            {"id": 4, "is_noise": True, "centroid": [0.5, 0.5, 0.5], "n_members": 3},
+        ]
+        order = [c["id"] for c in _diverse_root_clusters(clusters, random.Random(0))]
+        self.assertNotIn(4, order)  # noise excluded
+        self.assertEqual(order[0], 0)  # heaviest first
+        self.assertIn(order[1], (2, 3))  # then a distant cluster, not the near-duplicate (1)
+
+
+class ReportTests(unittest.TestCase):
+    """The NotebookLM-style run report assembles from a run's briefs."""
+
+    def test_build_run_report(self):
+        import tempfile
+        from pathlib import Path
+        from dmn import store, report
+
+        tmp = Path(tempfile.mkdtemp())
+        c = store.connect(tmp / "db.sqlite")
+        store.start_run(c, "runX", command="wander")
+        store.add_journal(
+            c, "What's a fresh angle on bandits?", "cold", ["arxiv"], {"total": 0.5},
+            str(tmp / "a.md"), activity="code_sketch", run_id="runX", fulfillment=1.0,
+            grounding=[{"title": "Bandit Algorithms", "url": "http://x", "source": "arxiv"}],
+            rabbit_holes=["Thompson sampling priors"],
+        )
+
+        class StubLLM:
+            name = "stub"
+
+        md_path = report.build_run_report(c, "runX", llm=StubLLM(), journal_dir=tmp)
+        self.assertIsNotNone(md_path)
+        text = Path(md_path).read_text()
+        self.assertIn("## Overview", text)
+        self.assertIn("## Findings", text)
+        self.assertIn("bandits", text)
+        self.assertIn("arxiv", text)  # grounding source surfaced
+
+
 class FencedExtractionTests(unittest.TestCase):
     """Guards for the 'always the same dry-run app' bug: truncated output must not yield
     None (which made callers fall back to a canned stub)."""

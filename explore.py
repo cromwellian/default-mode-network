@@ -269,6 +269,9 @@ def main(
             activity=activity.name,
             artifact_paths=[str(a.bytes_path) for a in result.artifacts if a.bytes_path],
             execution_result=result.execution,
+            fulfillment=result.metadata.get("fulfillment"),
+            fulfillment_breakdown=result.metadata.get("fulfillment_breakdown"),
+            grounding=result.metadata.get("grounding"),
         )
         store.add_finding(
             conn, chosen_seed.text + " :: " + result.body_md[:200], brief_emb
