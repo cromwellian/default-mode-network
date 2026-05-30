@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Product Sommelier</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23171715'/%3E%3Cpath d='M21 12h22l-5 18v16l7 4v4H19v-4l7-4V30Z' fill='%23efe4d2'/%3E%3Cpath d='M24 30h16' stroke='%239b3f2e' stroke-width='5'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #191815;
+      --paper: #f4ead8;
+      --cream: #fff8ea;
+      --line: #d3bd99;
+      --red: #9b3f2e;
+      --green: #236a5d;
+      --blue: #285f87;
+      --gold: #b4822d;
+      --violet: #60457d;
+      --muted: #716754;
+      --shadow: 0 24px 80px rgba(25, 24, 21, 0.18);
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background:
+        repeating-linear-gradient(90deg, rgba(25, 24, 21, 0.04) 0 1px, transparent 1px 36px),
+        repeating-linear-gradient(0deg, rgba(25, 24, 21, 0.03) 0 1px, transparent 1px 36px),
+        var(--paper);
+      color: var(--ink);
+      font: 1rem/1.48 Georgia, "Times New Roman", serif;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(110deg, transparent 0 36%, rgba(155, 63, 46, 0.07) 36% 38%, transparent 38% 100%),
+        linear-gradient(22deg, transparent 0 62%, rgba(35, 106, 93, 0.08) 62% 64%, transparent 64% 100%);
+      mix-blend-mode: multiply;
+    }
+
+    a {
+      color: inherit;
+      text-decoration-color: rgba(25, 24, 21, 0.35);
+      text-underline-offset: 0.16em;
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .shell {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 64px;
+    }
+
+    .hero {
+      min-height: calc(100dvh - 56px);
+      display: grid;
+      grid-template-columns: minmax(0, 0.96fr) minmax(320px, 0.74fr);
+      gap: 28px;
+      align-items: stretch;
+    }
+
+    .cover {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--ink);
+      background: var(--cream);
+      box-shadow: var(--shadow);
+      padding: clamp(24px, 4vw, 54px);
+      display: grid;
+      align-content: space-between;
+    }
+
+    .cover::before,
+    .cover::after {
+      content: "";
+      position: absolute;
+      border: 1px solid rgba(25, 24, 21, 0.28);
+      pointer-events: none;
+    }
+
+    .cover::before {
+      width: 340px;
+      aspect-ratio: 1;
+      right: -130px;
+      top: -130px;
+      transform: rotate(19deg);
+      background:
+        linear-gradient(90deg, transparent 49%, rgba(25, 24, 21, 0.18) 49% 51%, transparent 51%),
+        linear-gradient(0deg, transparent 49%, rgba(25, 24, 21, 0.18) 49% 51%, transparent 51%);
+    }
+
+    .cover::after {
+      left: 24px;
+      right: 24px;
+      bottom: 24px;
+      height: 88px;
+      background:
+        linear-gradient(90deg, var(--red), var(--red)) 0 0 / 18% 100% no-repeat,
+        linear-gradient(90deg, var(--green), var(--green)) 30% 0 / 18% 100% no-repeat,
+        linear-gradient(90deg, var(--blue), var(--blue)) 62% 0 / 18% 100% no-repeat;
+      opacity: 0.86;
+      clip-path: polygon(0 36%, 100% 8%, 100% 64%, 0 92%);
+    }
+
+    .kicker {
+      margin: 0 0 18px;
+      color: var(--muted);
+      font: 700 0.78rem/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 8ch;
+      font-size: clamp(3.9rem, 11vw, 9rem);
+      line-height: 0.82;
+      letter-spacing: 0;
+      font-weight: 900;
+      text-wrap: balance;
+    }
+
+    .deck {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 18px;
+    }
+
+    .brief {
+      border: 1px solid var(--line);
+      background: rgba(255, 248, 234, 0.76);
+      padding: 22px;
+    }
+
+    .brief p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 1.08rem;
+    }
+
+    .stamp-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .stamp {
+      min-height: 148px;
+      border: 1px solid var(--ink);
+      background: var(--cream);
+      padding: 14px;
+      display: grid;
+      align-content: space-between;
+      box-shadow: 8px 8px 0 rgba(25, 24, 21, 0.08);
+    }
+
+    .stamp strong {
+      display: block;
+      font-size: 2.25rem;
+      line-height: 0.92;
+    }
+
+    .stamp span {
+      color: var(--muted);
+      font: 700 0.72rem/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      text-transform: uppercase;
+    }
+
+    .nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 26px 0;
+    }
+
+    .nav a,
+    .button {
+      min-height: 44px;
+      border: 1px solid var(--ink);
+      background: var(--cream);
+      color: var(--ink);
+      display: inline-grid;
+      place-items: center;
+      padding: 9px 14px;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .nav a:hover,
+    .nav a:focus-visible,
+    .button:hover,
+    .button:focus-visible {
+      background: var(--ink);
+      color: var(--cream);
+      outline: 2px solid var(--ink);
+      outline-offset: 2px;
+    }
+
+    section {
+      margin-top: 54px;
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 18px;
+      align-items: end;
+      border-bottom: 1px solid var(--ink);
+      padding-bottom: 14px;
+      margin-bottom: 20px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 4.2rem);
+      line-height: 0.94;
+      text-wrap: balance;
+    }
+
+    .section-head p {
+      margin: 0;
+      color: var(--muted);
+      max-width: 34ch;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      position: relative;
+      border: 1px solid var(--line);
+      background: rgba(255, 248, 234, 0.88);
+      min-height: 360px;
+      padding: 18px;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      gap: 14px;
+      content-visibility: auto;
+      contain-intrinsic-block-size: auto 380px;
+    }
+
+    .card::before {
+      content: "";
+      position: absolute;
+      inset: 10px;
+      border: 1px dashed rgba(25, 24, 21, 0.18);
+      pointer-events: none;
+    }
+
+    .tone-red { --tone: var(--red); }
+    .tone-green { --tone: var(--green); }
+    .tone-blue { --tone: var(--blue); }
+    .tone-gold { --tone: var(--gold); }
+    .tone-violet { --tone: var(--violet); }
+
+    .label {
+      color: var(--tone);
+      font: 700 0.72rem/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      text-transform: uppercase;
+    }
+
+    .card h3 {
+      margin: 0;
+      font-size: 2rem;
+      line-height: 0.95;
+      text-wrap: balance;
+    }
+
+    .glass {
+      width: 86px;
+      height: 120px;
+      margin: 4px 0 0;
+      border: 2px solid var(--ink);
+      border-radius: 8px 8px 28px 28px / 8px 8px 38px 38px;
+      background:
+        linear-gradient(to top, color-mix(in oklab, var(--tone), white 26%) 0 52%, rgba(255, 248, 234, 0.9) 52% 100%);
+      box-shadow: inset 10px 0 0 rgba(255, 255, 255, 0.2);
+    }
+
+    .card p {
+      margin: 0;
+      color: var(--muted);
+      text-wrap: pretty;
+    }
+
+    .card dl {
+      margin: 0;
+      display: grid;
+      gap: 7px;
+      color: var(--ink);
+    }
+
+    .card dt {
+      color: var(--muted);
+      font: 700 0.72rem/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      text-transform: uppercase;
+    }
+
+    .card dd {
+      margin: 0;
+    }
+
+    .spread {
+      display: grid;
+      grid-template-columns: 0.85fr 1.15fr;
+      border: 1px solid var(--ink);
+      background: var(--cream);
+    }
+
+    .folio {
+      padding: 26px;
+      border-right: 1px solid var(--ink);
+      background:
+        linear-gradient(90deg, rgba(35, 106, 93, 0.14), transparent 44%),
+        var(--cream);
+    }
+
+    .folio h3 {
+      margin: 0;
+      font-size: clamp(2.2rem, 5vw, 5.6rem);
+      line-height: 0.88;
+    }
+
+    .folio p {
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 1.06rem;
+    }
+
+    .notes {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .note-card {
+      min-height: 230px;
+      padding: 22px;
+      border-left: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: rgba(244, 234, 216, 0.42);
+    }
+
+    .note-card:nth-child(2n + 1) {
+      border-left: 0;
+    }
+
+    .note-card h4 {
+      margin: 0 0 10px;
+      font-size: 1.35rem;
+      line-height: 1.02;
+    }
+
+    .note-card p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .machine {
+      display: grid;
+      grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .dials {
+      border: 1px solid var(--ink);
+      background: #171715;
+      color: var(--cream);
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
+
+    .dial {
+      display: grid;
+      gap: 7px;
+    }
+
+    .dial label {
+      font: 700 0.72rem/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      text-transform: uppercase;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--gold);
+    }
+
+    .output {
+      border: 1px solid var(--ink);
+      background: var(--cream);
+      padding: 24px;
+      display: grid;
+      align-content: space-between;
+      min-height: 330px;
+    }
+
+    .output p {
+      margin: 0;
+      font-size: clamp(1.8rem, 4vw, 4.4rem);
+      line-height: 0.98;
+      text-wrap: balance;
+    }
+
+    .output footer {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 24px;
+    }
+
+    .cabinet {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .object {
+      border: 1px solid var(--ink);
+      background: var(--cream);
+      padding: 16px;
+      min-height: 220px;
+      display: grid;
+      align-content: space-between;
+    }
+
+    .object h3 {
+      margin: 0;
+      font-size: 1.4rem;
+      line-height: 1.05;
+    }
+
+    .object p {
+      margin: 14px 0 0;
+      color: var(--muted);
+    }
+
+    .object .mark {
+      width: 56px;
+      aspect-ratio: 1;
+      border: 1px solid var(--ink);
+      background:
+        linear-gradient(135deg, var(--tone) 0 48%, transparent 48% 52%, var(--ink) 52% 100%);
+    }
+
+    .credits {
+      margin-top: 54px;
+      padding-top: 20px;
+      border-top: 1px solid var(--ink);
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width: 920px) {
+      .hero,
+      .spread,
+      .machine {
+        grid-template-columns: 1fr;
+      }
+
+      .cover {
+        min-height: 620px;
+      }
+
+      .folio {
+        border-right: 0;
+        border-bottom: 1px solid var(--ink);
+      }
+
+      .cards,
+      .cabinet {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 620px) {
+      .shell {
+        width: min(100% - 22px, 1180px);
+        padding-top: 11px;
+      }
+
+      .cover {
+        min-height: 540px;
+      }
+
+      .stamp-grid,
+      .cards,
+      .notes,
+      .cabinet {
+        grid-template-columns: 1fr;
+      }
+
+      .section-head {
+        grid-template-columns: 1fr;
+      }
+
+      .card {
+        min-height: auto;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="hero">
+      <div class="cover">
+        <div>
+          <p class="kicker">Invented from Vivian's local DMN profile</p>
+          <h1>The Product Sommelier</h1>
+        </div>
+        <p class="kicker">A tasting menu for interfaces with a palate</p>
+      </div>
+
+      <div class="deck">
+        <article class="brief">
+          <p>This is not a map of your interests. It is a cabinet of little works made from their collisions: product critique strained through cocktail language, travel writing poured into interface design, painting practice used as a diagnostic tool.</p>
+        </article>
+        <div class="stamp-grid" aria-label="Ingredients">
+          <div class="stamp"><strong>AI</strong><span>product pressure</span></div>
+          <div class="stamp"><strong>54</strong><span>spirits traces</span></div>
+          <div class="stamp"><strong>f/8</strong><span>documentary eye</span></div>
+          <div class="stamp"><strong>oil</strong><span>slow revision</span></div>
+        </div>
+      </div>
+    </header>
+
+    <nav class="nav" aria-label="Artifact sections">
+      <a href="#flight">Flight</a>
+      <a href="#field-notes">Field notes</a>
+      <a href="#machine">Prompt machine</a>
+      <a href="#cabinet">Object cabinet</a>
+    </nav>
+
+    <main>
+      <section id="flight">
+        <div class="section-head">
+          <h2>Flight of impossible interfaces</h2>
+          <p>Six invented pours. Each one is a product idea disguised as a drink, built from your profile instead of copied from it.</p>
+        </div>
+        <div class="cards">
+          <article class="card tone-red">
+            <span class="label">Aperitif</span>
+            <h3>The Second Voice</h3>
+            <div class="glass" aria-hidden="true"></div>
+            <p>A research copilot served in a coupe chilled with skepticism.</p>
+            <dl>
+              <dt>Tastes like</dt>
+              <dd>citrus peel, marginalia, a transcript that starts arguing back</dd>
+              <dt>Product spell</dt>
+              <dd>Turns every interview into a room with one more intelligent chair</dd>
+            </dl>
+          </article>
+
+          <article class="card tone-green">
+            <span class="label">Highball</span>
+            <h3>Nakasendo Undo</h3>
+            <div class="glass" aria-hidden="true"></div>
+            <p>A walking trail for decisions: each mile lets you reverse one assumption.</p>
+            <dl>
+              <dt>Tastes like</dt>
+              <dd>cedar, rain on stone, a backlog becoming humane</dd>
+              <dt>Product spell</dt>
+              <dd>Changes "ship it" into "walk with it until it tells the truth"</dd>
+            </dl>
+          </article>
+
+          <article class="card tone-blue">
+            <span class="label">Stirred</span>
+            <h3>Latency Negroni</h3>
+            <div class="glass" aria-hidden="true"></div>
+            <p>Bitter, exact, and useful for dashboards that pretend time is free.</p>
+            <dl>
+              <dt>Tastes like</dt>
+              <dd>burnt orange, observability, a graph finally admitting its cost</dd>
+              <dt>Product spell</dt>
+              <dd>Makes invisible waiting visible enough to design with</dd>
+            </dl>
+          </article>
+
+          <article class="card tone-gold">
+            <span class="label">Field blend</span>
+            <h3>Rajasthan Dry Run</h3>
+            <div class="glass" aria-hidden="true"></div>
+            <p>A prototype tested in heat, glare, bargaining, and color.</p>
+            <dl>
+              <dt>Tastes like</dt>
+              <dd>dust, saffron, interface copy that survives noon sun</dd>
+              <dt>Product spell</dt>
+              <dd>Deletes all features that only work in conference rooms</dd>
+            </dl>
+          </article>
+
+          <article class="card tone-violet">
+            <span class="label">After dinner</span>
+            <h3>Plein-Air Dashboard</h3>
+            <div class="glass" aria-hidden="true"></div>
+            <p>An energy tool painted outside before it is specified inside.</p>
+            <dl>
+              <dt>Tastes like</dt>
+              <dd>linseed, kilowatts, a color study of operational risk</dd>
+              <dt>Product spell</dt>
+              <dd>Lets the interface inherit weather, time, and consequence</dd>
+            </dl>
+          </article>
+
+          <article class="card tone-red">
+            <span class="label">Digestif</span>
+            <h3>Empty State Sazerac</h3>
+            <div class="glass" aria-hidden="true"></div>
+            <p>A blank page that does not apologize. It hands you a ritual.</p>
+            <dl>
+              <dt>Tastes like</dt>
+              <dd>anise, restraint, one excellent verb</dd>
+              <dt>Product spell</dt>
+              <dd>Turns onboarding from instruction into invitation</dd>
+            </dl>
+          </article>
+        </div>
+      </section>
+
+      <section id="field-notes">
+        <div class="section-head">
+          <h2>Field notes from products that do not exist yet</h2>
+          <p>Short fictions that cross your travel writing, visual practice, spirits language, and AI product work.</p>
+        </div>
+        <div class="spread">
+          <article class="folio">
+            <p class="kicker">Notebook 01</p>
+            <h3>Markets are interfaces with weather.</h3>
+            <p>They teach scanning before reading, trust before explanation, and pricing before consent. A good dashboard should understand this.</p>
+          </article>
+          <div class="notes">
+            <article class="note-card">
+              <h4>Varanasi usability test</h4>
+              <p>The first participant ignored the navigation and followed the smoke. The prototype improved immediately: fewer labels, stronger scent trails, one sacred action per screen.</p>
+            </article>
+            <article class="note-card">
+              <h4>Sommelier mode</h4>
+              <p>The AI stopped ranking options and began pairing them. It suggested not the best answer, but the answer that could stand next to the user's appetite.</p>
+            </article>
+            <article class="note-card">
+              <h4>Studio critique for software</h4>
+              <p>Pin the flow to the wall. Step back ten feet. If the composition still looks nervous, the problem is not copy. It is mass.</p>
+            </article>
+            <article class="note-card">
+              <h4>Distillery onboarding</h4>
+              <p>Every new user receives a barrel number, a waiting period, and a promise: the product will reveal complexity only after it has earned patience.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="machine">
+        <div class="section-head">
+          <h2>Cross-pollination machine</h2>
+          <p>Move the dials and draw a prompt. It generates little assignments from your overlapping worlds.</p>
+        </div>
+        <div class="machine">
+          <form class="dials" id="promptForm">
+            <div class="dial">
+              <label for="craft">craft</label>
+              <input id="craft" name="craft" type="range" min="0" max="4" value="2">
+            </div>
+            <div class="dial">
+              <label for="place">place</label>
+              <input id="place" name="place" type="range" min="0" max="4" value="1">
+            </div>
+            <div class="dial">
+              <label for="product">product pressure</label>
+              <input id="product" name="product" type="range" min="0" max="4" value="3">
+            </div>
+            <button class="button" type="button" id="drawPrompt">Draw a new prompt</button>
+          </form>
+          <article class="output" aria-live="polite">
+            <p id="promptText">Design a climate dashboard as if it were a cocktail menu for a city after rain.</p>
+            <footer>
+              <button class="button" type="button" id="copyPrompt">Copy</button>
+              <span class="kicker" id="promptSource">product x spirits x travel</span>
+            </footer>
+          </article>
+        </div>
+      </section>
+
+      <section id="cabinet">
+        <div class="section-head">
+          <h2>Object cabinet</h2>
+          <p>Small impossible objects you could write, photograph, paint, or prototype.</p>
+        </div>
+        <div class="cabinet">
+          <article class="object tone-green">
+            <div class="mark" aria-hidden="true"></div>
+            <div>
+              <h3>A dashboard that remembers weather</h3>
+              <p>It changes its grammar when the day is smoky, bright, wet, or dangerously still.</p>
+            </div>
+          </article>
+          <article class="object tone-red">
+            <div class="mark" aria-hidden="true"></div>
+            <div>
+              <h3>A glass for confirmation bias</h3>
+              <p>The drink becomes more bitter each time the user ignores contradictory evidence.</p>
+            </div>
+          </article>
+          <article class="object tone-blue">
+            <div class="mark" aria-hidden="true"></div>
+            <div>
+              <h3>A travel lens for product teams</h3>
+              <p>Before launching, every flow must survive a market, a border, and a tired parent.</p>
+            </div>
+          </article>
+          <article class="object tone-violet">
+            <div class="mark" aria-hidden="true"></div>
+            <div>
+              <h3>An oil painting of an API</h3>
+              <p>Not the endpoint. The transaction: pressure, edge, wait, permission, return.</p>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="credits">
+      <span>Generated locally from 139 DMN signals.</span>
+      <span>Source ingredients: product design, photography, wine and spirits, travel writing, painting.</span>
+    </footer>
+  </div>
+
+  <script>
+    const ingredients = {
+      craft: ["oil painting", "cocktail photography", "documentary framing", "spirits education", "field writing"],
+      place: ["Varanasi", "Rajasthan", "Nakasendo", "Florence", "a Palo Alto studio"],
+      product: ["a climate dashboard", "an AI research copilot", "a developer platform", "an empty state", "an energy workflow"]
+    };
+
+    const patterns = [
+      "Design {product} as if it were {craft} in {place}.",
+      "Write the onboarding for {product} using the rules of {craft}, then test it in {place}.",
+      "Make a photo brief for {product}: it should feel like {place} and explain itself like {craft}.",
+      "Invent a ritual for {product} that borrows patience from {craft} and pressure from {place}.",
+      "Create a one-page essay where {craft} becomes the operating system for {product} in {place}."
+    ];
+
+    const promptText = document.getElementById("promptText");
+    const promptSource = document.getElementById("promptSource");
+    const ranges = [...document.querySelectorAll("input[type='range']")];
+
+    function pickPrompt() {
+      const values = Object.fromEntries(ranges.map((range) => [range.name, Number(range.value)]));
+      const pattern = patterns[(values.craft + values.place + values.product) % patterns.length];
+      const text = pattern
+        .replace("{craft}", ingredients.craft[values.craft])
+        .replace("{place}", ingredients.place[values.place])
+        .replace("{product}", ingredients.product[values.product]);
+      promptText.textContent = text;
+      promptSource.textContent = `${ingredients.product[values.product]} x ${ingredients.craft[values.craft]} x ${ingredients.place[values.place]}`;
+    }
+
+    document.getElementById("drawPrompt").addEventListener("click", () => {
+      ranges.forEach((range) => {
+        range.value = Math.floor(Math.random() * 5);
+      });
+      pickPrompt();
+    });
+
+    ranges.forEach((range) => range.addEventListener("input", pickPrompt));
+
+    document.getElementById("copyPrompt").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(promptText.textContent);
+        promptSource.textContent = "copied";
+      } catch {
+        promptSource.textContent = "select and copy";
+      }
+    });
+  </script>
+</body>
+</html>
