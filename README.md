@@ -187,7 +187,7 @@ the brief for dopamine, and writes it to the journal exactly like a research bri
 | `ml_experiment`     | Tiny torch experiment, ≤200 lines, ≤30s on CPU, prints `METRIC: ...`.  | (`torch` extra)                         |
 | `image_riff`        | LLM rewrites the seed as a visual prompt, calls an image backend.      | `GOOGLE_API_KEY` *or* `REPLICATE_API_TOKEN` |
 | `music_riff`        | LLM rewrites the seed as musical direction, calls an audio backend.    | `STABILITY_API_KEY` (Stable Audio 2.0) or Lyria/Suno when public |
-| `video_riff`        | Same shape as image; off by default in any sane mix (latency).         | `REPLICATE_API_TOKEN`                   |
+| `video_riff`        | Same shape as image; disabled unless `DMN_ENABLE_VIDEO_RIFFS=1`.       | `RUN_API_KEY` or `REPLICATE_API_TOKEN`  |
 | `mood_journal`      | Reflective ~200-word journal entry over your top clusters.             | (none)                                  |
 
 Examples:
@@ -241,9 +241,20 @@ modality based on the env you have configured):
 | music    | `stable_audio`  | `STABILITY_API_KEY`                    | Stable Audio 2.0 (`/v2beta/audio/...`) |
 | music    | `lyria`         | `GOOGLE_API_KEY`                       | Lyria 2 — currently allow-listed; stub returns "unavailable" |
 | music    | `suno`          | `SUNO_API_KEY`                         | Stub until upstream API is public      |
-| video    | `replicate_video` | `REPLICATE_API_TOKEN`                | default model: `lucataco/animate-diff` (override via `DMN_VIDEO_MODEL_REPLICATE`) |
-| video    | `video_stub`    | (none)                                  | placeholder; Veo 3 / Sora / Runway / Kling adapters drop in here |
+| video    | `runway_video`  | `RUN_API_KEY` / `RUNWAYML_API_SECRET` / `RUNWAY_API_KEY` | Runway text-to-video, default `seedance2`, 10s clips |
+| video    | `replicate_video` | `REPLICATE_API_TOKEN`                | fallback; default model: `lucataco/animate-diff` (override via `DMN_VIDEO_MODEL_REPLICATE`) |
+| video    | `video_stub`    | (none)                                  | placeholder for future adapters |
 | (any)    | `dryrun_*`      | (none)                                  | tiny placeholder files for `--dry-run` |
+
+Image riffs prefer `nano_banana` exclusively when it is configured because it is much
+better at diagram text. Set `DMN_IMAGE_ALLOW_FALLBACKS=1` only if you want HF/Replicate
+fallbacks after Nano Banana errors or quota limits.
+
+Runway video defaults to `DMN_VIDEO_RUNWAY_MODEL=seedance2`, `DMN_VIDEO_SECONDS=10`, and
+`DMN_VIDEO_RUNWAY_RATIO=1280:720`. Seedance 2 supports 5–15 second durations; set
+`DMN_VIDEO_SECONDS=5` only when you want the fastest cheap smoke test.
+Real video riffs are disabled by default because they are slow and expensive. Set
+`DMN_ENABLE_VIDEO_RIFFS=1` only for a run where you explicitly want video generation.
 
 Generators are OFF by default to keep the loop fast and key-free. The artifact's own
 embedding is **not** yet folded into the dopamine score — that's a v0.2 item (would need

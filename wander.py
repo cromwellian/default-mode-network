@@ -42,6 +42,7 @@ from dmn import report as report_mod
 from dmn.activities import ActivityContext, ActivityResult
 from dmn.llm import get_llm
 from dmn.loop import available_tools_for
+from dmn.activities.riff_prompts import load_parent_brief_md, make_legacy_media_prompt
 from dmn.sandbox import normalize_mode
 
 console = Console()
@@ -719,6 +720,15 @@ def _expand_brief(
     node_started = time.time()
     old_forced_tools = getattr(ctx, "forced_tools", None)
     ctx.forced_tools = forced_tools if activity.name == "research" else None
+    ctx.cluster_label = cluster_label
+    ctx.parent_brief_md = ""
+    if parent_id is not None and activity.name in {
+        "image_riff",
+        "music_riff",
+        "video_riff",
+    }:
+        parent_row = store.get_journal(conn, parent_id)
+        ctx.parent_brief_md = load_parent_brief_md(parent_row)
     try:
         result: ActivityResult = activity.run(chosen_seed, ctx)
     except Exception as e:
@@ -726,6 +736,8 @@ def _expand_brief(
         return None, 0.0, None
     finally:
         ctx.forced_tools = old_forced_tools
+        ctx.cluster_label = ""
+        ctx.parent_brief_md = ""
 
     if not (result.body_md or "").strip():
         reason = result.metadata.get("reason", "empty body")
@@ -747,6 +759,7 @@ def _expand_brief(
         artifact_meta = _maybe_generate(
             clusters, centroids, brief_emb,
             chosen_seed.text, result.body_md, enabled_modalities, ctx.dry_run, verbose,
+            llm=ctx.llm,
         )
 
     artifacts_dicts = [_artifact_to_dict(a) for a in result.artifacts]
@@ -849,6 +862,7 @@ def _maybe_generate(
     enabled: set[str],
     dry_run: bool,
     verbose: bool,
+    llm=None,
 ) -> Optional[dict]:
     """Legacy v0.1.1 generator path (only triggered by --generate, only on research)."""
     label = ""
@@ -865,9 +879,15 @@ def _maybe_generate(
             )
         return None
     gen = candidates[0]
-    visual_prompt = (prompt_seed + ". " + brief_body[:200]).strip()
+    media_prompt = make_legacy_media_prompt(
+        modality=gen.modality,
+        seed_text=prompt_seed,
+        brief_body=brief_body,
+        cluster_label=label,
+        llm=llm,
+    )
     try:
-        artifact = gen.generate(visual_prompt)
+        artifact = gen.generate(media_prompt)
     except Exception as e:
         if verbose:
             console.print(f"[yellow]  generator {gen.name}: {e}[/]")

@@ -7,6 +7,7 @@ under the chosen sandbox and capture the output (and any `*.png` it writes).
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -41,7 +42,9 @@ def _system_for_budget(code_budget: str) -> str:
         "You explore algorithms by writing demonstration scripts. "
         f"Constraints: {size} stdlib + numpy. matplotlib is OPTIONAL — if you use it, "
         "write the plot to a file like `plot.png` (do NOT call plt.show()), and ALSO include "
-        "a fallback ASCII visualization printed to stdout. Be concrete and educational."
+        "a fallback ASCII visualization printed to stdout. Be concrete and educational. "
+        "Target NumPy 2.x compatibility: use function forms like `np.ptp(arr)` instead "
+        "of removed ndarray methods like `arr.ptp()`."
     )
 
 USER_TEMPLATE = (
@@ -214,6 +217,7 @@ class AlgorithmExploreActivity:
                 "complexity": "O(n)",
             }
             commentary = commentary or "Reservoir sampling is the canonical streaming-uniform-sample trick."
+        code = _ensure_numpy2_compat(code)
         return code, meta, commentary
 
     def _render_body(
@@ -267,3 +271,9 @@ class AlgorithmExploreActivity:
 
 
 register(AlgorithmExploreActivity())
+
+
+def _ensure_numpy2_compat(code: str) -> str:
+    """Patch common NumPy 1.x ndarray method calls that fail on NumPy 2.x."""
+    code = re.sub(r"\b([A-Za-z_][A-Za-z0-9_]*)\.ptp\(\)", r"np.ptp(\1)", code)
+    return code

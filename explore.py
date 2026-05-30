@@ -37,6 +37,7 @@ from dmn import generators as gens
 from dmn import html_journal, journal, seeds, store, taste
 from dmn.activities import ActivityContext, ActivityResult
 from dmn.llm import get_llm
+from dmn.activities.riff_prompts import make_legacy_media_prompt
 from dmn.sandbox import normalize_mode
 
 console = Console()
@@ -194,6 +195,8 @@ def main(
             )
 
         cluster_label = _nearest_cluster_label(clusters, centroids, chosen_seed.text)
+        ctx.cluster_label = cluster_label
+        ctx.parent_brief_md = ""
         activity = acts.pick_activity(
             mix, ctx, rng, cluster_label=cluster_label, seed_text=chosen_seed.text
         )
@@ -239,7 +242,7 @@ def main(
         if generate and activity.name == "research":
             artifact_meta = _maybe_generate(
                 cluster_label, chosen_seed.text, result.body_md,
-                enabled_modalities, dry_run, verbose,
+                enabled_modalities, dry_run, verbose, llm=llm,
             )
 
         artifacts_dicts = [_artifact_to_dict(a) for a in result.artifacts]
@@ -371,6 +374,7 @@ def _maybe_generate(
     enabled: set[str],
     dry_run: bool,
     verbose: bool,
+    llm=None,
 ) -> Optional[dict]:
     """Legacy v0.1.1 generator pipeline (only triggered by --generate). Activities are preferred."""
     candidates = gens.pick_for_cluster(cluster_label, dry_run=dry_run)
@@ -382,9 +386,15 @@ def _maybe_generate(
             )
         return None
     gen = candidates[0]
-    visual_prompt = (prompt_seed + ". " + brief_body[:200]).strip()
+    media_prompt = make_legacy_media_prompt(
+        modality=gen.modality,
+        seed_text=prompt_seed,
+        brief_body=brief_body,
+        cluster_label=cluster_label,
+        llm=llm,
+    )
     try:
-        artifact = gen.generate(visual_prompt)
+        artifact = gen.generate(media_prompt)
     except Exception as e:
         if verbose:
             console.print(f"[yellow]  generator {gen.name}: {e}[/]")

@@ -59,6 +59,8 @@ class ActivityContext:
     ground: bool = True  # creation activities consume external references before riffing
     grounding_cache: dict = field(default_factory=dict)  # query -> [ResearchItem], per run
     forced_tools: Optional[list[str]] = None  # tree retool override for research
+    cluster_label: str = ""
+    parent_brief_md: str = ""  # parent research brief body when riffing a tree child
 
 
 @runtime_checkable
