@@ -38,3 +38,7 @@ data/*
 !data/.gitkeep
 journal/*
 !journal/.gitkeep
+
+# Vivian website trailer local scrape cache
+vivian/trailer-source/site-images/
+vivian/trailer-source/site-images-manifest.txt
