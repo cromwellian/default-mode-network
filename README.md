@@ -362,8 +362,70 @@ pyproject.toml
 - `dmn/seeds.py` — the mix of seed strategies. The default `explore.py` samples them with fixed probabilities; tune those. Each `Seed` now carries a `query` (clean keywords handed to the search APIs) distinct from its `text` (the conversational question the LLM synthesizes against) — `search_query()` derives one from the other when a generator doesn't set it.
 - `wander.py --explore` — UCB exploration weight for tree-mode frontier selection. `0` is pure best-first (greedy); higher values give shallower/less-committed branches an exploration premium so the wander doesn't tunnel down one thread.
 - `explore.py` / `wander.py` — loop strategy. Try a different planner, scorer, synthesis prompt, or tree policy. Log a one-line rationale near the changed strategy.
-- `DMN_LLM_PROVIDER` env var: `anthropic` (default if `ANTHROPIC_API_KEY` set), `openai`, or `stub`.
+- `DMN_LLM_PROVIDER` env var: `anthropic` (default if `ANTHROPIC_API_KEY` set), `openai`, `ollama`, `lmstudio`, `vllm`, or `stub`.
 - `DMN_EMBEDDINGS` env var: `st` (default, sentence-transformers) or `openai`.
+
+## Modal REST API
+
+Run DMN wanders remotely on [Modal](https://modal.com) with profile upload and artifact URLs. All profiles and run artifacts are scoped under a **caller-provided `user_id`** (your app’s tenant key).
+
+### Setup
+
+```bash
+cp .env.example .env          # fill in ANTHROPIC_API_KEY, HF_TOKEN, etc.
+./scripts/modal_secrets_setup.sh   # loads .env → Modal secret "dmn-env"
+uv sync --extra modal
+uv run modal deploy modal_api/app.py
+```
+
+The deploy prints a URL like `https://your-workspace--default-mode-network-api.modal.run`.
+
+### Provision a profile
+
+Prepare locally, then upload the SQLite file under your user id:
+
+```bash
+USER_ID=alice
+uv run prepare.py --dry-run     # or your real import flow
+curl -X POST "$API/v1/users/$USER_ID/profiles" -F "file=@data/dmn.sqlite"
+# → {"user_id": "alice", "profile_id": "abc123...", "stats": {...}}
+```
+
+`user_id` must be 1–64 chars, start with alphanumeric, and contain only letters, digits, `.`, `_`, or `-`.
+
+### Trigger a wander
+
+All `wander.py` flags are supported in the JSON body. Use `llm.preset` for Modal-hosted vLLM (Qwen, Gemma):
+
+```bash
+curl -X POST "$API/v1/users/$USER_ID/profiles/$PROFILE_ID/wander" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "iterations": 3,
+    "root_count": 2,
+    "max_depth": 2,
+    "llm": {"provider": "vllm", "preset": "qwen2.5-7b"}
+  }'
+```
+
+Remote Anthropic/OpenAI (from Modal secret):
+
+```bash
+curl -X POST "$API/v1/users/$USER_ID/profiles/$PROFILE_ID/wander" \
+  -H "Content-Type: application/json" \
+  -d '{"iterations": 1, "root_count": 1, "max_depth": 1}'
+```
+
+### Response format
+
+Wander responses include:
+
+- `user_id`, `profile_id`, `run_id`
+- `briefs` — journal rows with parsed `body_md` and frontmatter
+- `artifacts` — each file with inline `content` (text/small images) or metadata only
+- `urls` — map of relative path → fetch URL under `/v1/users/{user_id}/profiles/{id}/runs/{run_id}/files/...`
+
+List vLLM presets: `GET /v1/models`. Document wander params: `GET /v1/wander/params`.
 
 ## Notable forks
 

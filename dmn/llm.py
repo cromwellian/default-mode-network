@@ -1,6 +1,6 @@
 """LLM providers: anthropic, openai, ollama, lmstudio, and a stub for dry-run / no-key envs.
 
-Local providers (`ollama`, `lmstudio`) reuse the OpenAI SDK pointed at a custom `base_url`.
+Local providers (`ollama`, `lmstudio`, `vllm`) reuse the OpenAI SDK pointed at a custom `base_url`.
 Both expose an OpenAI-compatible `/v1/chat/completions` endpoint, so the wire-format code
 is identical — they're surfaced as separate provider names purely for UX clarity in env vars
 and CLI output.
@@ -36,6 +36,11 @@ _LOCAL_DEFAULTS = {
             "Is LM Studio's local server running? Open LM Studio → 'Local Server' tab → "
             "load a model → Start Server."
         ),
+    },
+    "vllm": {
+        "base_url": "http://localhost:8000/v1",
+        "model": "Qwen/Qwen2.5-7B-Instruct",
+        "hint": "Is the vLLM OpenAI server running? Set DMN_LLM_BASE_URL to its /v1 endpoint.",
     },
 }
 
@@ -195,7 +200,7 @@ def get_llm(provider: str | None = None, dry_run: bool = False):
     provider = (provider or os.environ.get("DMN_LLM_PROVIDER") or "").lower()
     if provider == "stub":
         return StubLLM()
-    if provider in ("ollama", "lmstudio"):
+    if provider in ("ollama", "lmstudio", "vllm"):
         try:
             return LocalOpenAICompatibleLLM(provider)
         except Exception:
