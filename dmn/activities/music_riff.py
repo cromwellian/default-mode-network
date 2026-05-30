@@ -11,13 +11,8 @@ from dmn.activities import ActivityContext, ActivityResult, register
 from dmn.fulfillment import compute_activity_fulfillment
 from dmn.journal import JOURNAL_DIR
 from dmn.paths import artifact_href_for_journal
+from dmn.activities.riff_prompts import make_music_prompt
 from dmn.seeds import Seed
-
-MUSIC_SYSTEM = (
-    "You translate research seeds into one-paragraph musical-direction prompts for a "
-    "text-to-audio model. Specify genre, instrumentation, tempo (bpm), mood, and any "
-    "structural notes (intro/build/release). Be concrete and brief."
-)
 
 
 class MusicRiffActivity:
@@ -103,16 +98,7 @@ class MusicRiffActivity:
         )
 
     def _make_prompt(self, seed: Seed, ctx: ActivityContext) -> str:
-        try:
-            resp = ctx.llm.complete(
-                system=MUSIC_SYSTEM,
-                user=f"Seed: {seed.text}\n\nWrite the musical direction now.",
-                max_tokens=200,
-            )
-            text = (resp.text or "").strip()
-        except Exception:
-            text = ""
-        return text or seed.text
+        return make_music_prompt(seed, ctx)
 
     def _backends(self, ctx: ActivityContext):
         """Available music backends in priority order; dry-run uses the stub only."""

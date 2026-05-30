@@ -1,26 +1,23 @@
-"""`video_riff` activity (v0.3, stub-grade): turn the seed into a short cinematic clip.
+"""`video_riff` activity (v0.3): turn the seed into a short cinematic clip.
 
-Available iff `REPLICATE_API_TOKEN` is set (via `dmn.generators.video_replicate`). High
-latency makes this a poor default for routine wanders, so the activity defaults to off
-in any sensible mix.
+Available iff a real video backend is configured. High latency makes this a poor
+default for routine wanders, so the activity defaults to off in any sensible mix.
 """
 from __future__ import annotations
+
+import os
 
 from dmn import generators as gens
 from dmn.activities import ActivityContext, ActivityResult, register
 from dmn.fulfillment import compute_activity_fulfillment
 from dmn.journal import JOURNAL_DIR
 from dmn.paths import artifact_href_for_journal
+from dmn.activities.riff_prompts import make_video_prompt
 from dmn.seeds import Seed
-
-VIDEO_SYSTEM = (
-    "You translate research seeds into one-paragraph cinematic-direction prompts for a "
-    "text-to-video model. Specify subject, camera move, lighting, mood, and pacing."
-)
 
 
 class VideoRiffActivity:
-    """Cinematic prompt → video (Replicate / dry-run stub)."""
+    """Cinematic prompt → video (Runway / Replicate / dry-run stub)."""
 
     name = "video_riff"
     requires_llm = False
@@ -30,6 +27,12 @@ class VideoRiffActivity:
     def available(self, ctx: ActivityContext) -> bool:
         if ctx.dry_run:
             return any(g for g in gens.available_for("video") if g.name.startswith("dryrun_"))
+        if os.environ.get("DMN_ENABLE_VIDEO_RIFFS", "").lower() not in {
+            "1",
+            "true",
+            "yes",
+        }:
+            return False
         real = [g for g in gens.available_for("video") if not g.name.startswith("dryrun_")]
         return len(real) > 0
 
@@ -54,12 +57,19 @@ class VideoRiffActivity:
                     "fulfillment_breakdown": fulfillment_breakdown,
                 },
             )
-        try:
-            artifact = backend.generate(prompt)
-        except Exception as e:
+        artifact = None
+        errors: list[str] = []
+        for backend in self._backends(ctx):
+            try:
+                artifact = backend.generate(prompt)
+                break
+            except Exception as e:
+                errors.append(f"{backend.name}: {e}")
+        if artifact is None:
+            err = "; ".join(errors) if errors else "no video backend available"
             body = (
                 f"## Video riff\n\n**Seed:** {seed.text}\n\n"
-                f"_(generator `{backend.name}` failed: {e})_"
+                f"_(all generators failed: {err})_"
             )
             fulfillment, fulfillment_breakdown = compute_activity_fulfillment(
                 activity=self.name, body_md=body, skipped=True
@@ -69,7 +79,8 @@ class VideoRiffActivity:
                 body_md=body,
                 embedding_text=seed.text,
                 metadata={
-                    "error": str(e),
+                    "error": err,
+                    "generator": backend.name if backend else None,
                     "fulfillment": fulfillment,
                     "fulfillment_breakdown": fulfillment_breakdown,
                 },
@@ -82,7 +93,7 @@ class VideoRiffActivity:
             [
                 f"## Video riff: {seed.text}",
                 "",
-                f"**Generator:** `{backend.name}`",
+                f"**Generator:** `{artifact.generator}`",
                 "",
                 "### Cinematic direction",
                 "",
@@ -102,7 +113,7 @@ class VideoRiffActivity:
             artifacts=[artifact],
             embedding_text=seed.text + " :: " + prompt[:300],
             metadata={
-                "generator": backend.name,
+                "generator": artifact.generator,
                 "video_prompt": prompt,
                 "fulfillment": fulfillment,
                 "fulfillment_breakdown": fulfillment_breakdown,
@@ -110,23 +121,18 @@ class VideoRiffActivity:
         )
 
     def _make_prompt(self, seed: Seed, ctx: ActivityContext) -> str:
-        try:
-            resp = ctx.llm.complete(
-                system=VIDEO_SYSTEM,
-                user=f"Seed: {seed.text}\n\nWrite the cinematic direction now.",
-                max_tokens=200,
-            )
-            text = (resp.text or "").strip()
-        except Exception:
-            text = ""
-        return text or seed.text
+        return make_video_prompt(seed, ctx)
 
     def _pick_backend(self, ctx: ActivityContext):
+        backends = self._backends(ctx)
+        return backends[0] if backends else None
+
+    def _backends(self, ctx: ActivityContext):
         if ctx.dry_run:
-            stubs = [g for g in gens.available_for("video") if g.name.startswith("dryrun_")]
-            return stubs[0] if stubs else None
+            return [g for g in gens.available_for("video") if g.name.startswith("dryrun_")]
         real = [g for g in gens.available_for("video") if not g.name.startswith("dryrun_")]
-        return real[0] if real else None
+        preferred = [g for g in real if g.name == "runway_video"]
+        return preferred + [g for g in real if g.name != "runway_video"]
 
 
 register(VideoRiffActivity())

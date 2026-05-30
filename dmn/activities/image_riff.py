@@ -1,10 +1,12 @@
-"""`image_riff` activity (v0.3): turn the seed into a vivid visual prompt + image.
+"""`image_riff` activity (v0.3): illustrate the wander subject as an image.
 
-Re-prompts the seed via the LLM into a more cinematic visual brief, then calls the
-first available image generator (Nano Banana / Replicate / dry-run stub). Wraps the
-result with short LLM commentary on what the image is trying to express.
+Builds a subject-aware visual prompt from the seed, cluster theme, and parent brief
+(when riffing a research child), then calls the first available image generator.
+Wraps the result with short curator commentary on how the image conveys the topic.
 """
 from __future__ import annotations
+
+import os
 
 from dmn import generators as gens
 from dmn.activities import ActivityContext, ActivityResult, register
@@ -12,17 +14,13 @@ from dmn.activities._helpers import slugify
 from dmn.fulfillment import compute_activity_fulfillment
 from dmn.journal import JOURNAL_DIR
 from dmn.paths import artifact_href_for_journal
+from dmn.activities.riff_prompts import make_image_prompt
 from dmn.seeds import Seed
 
-VISUAL_SYSTEM = (
-    "You translate research seeds into vivid, concrete one-paragraph visual prompts "
-    "for a text-to-image model. Specify subject, composition, mood, palette, lighting, "
-    "and any references to art movements or photographers when helpful. Avoid clichés."
-)
-
 COMMENTARY_SYSTEM = (
-    "You are a curator. In 2-3 sentences, explain what an image generated from a given "
-    "visual prompt is trying to express, and why it pairs with the original seed."
+    "You are a curator. In 2-3 sentences, explain how the image illustrates the "
+    "wander's subject matter — what a viewer should recognize about the topic — "
+    "and why it pairs with the seed. Do not praise surrealism for its own sake."
 )
 
 
@@ -111,17 +109,7 @@ class ImageRiffActivity:
         )
 
     def _make_visual_prompt(self, seed: Seed, ctx: ActivityContext) -> str:
-        """LLM rewrite of the seed as a one-paragraph visual prompt; falls back to seed."""
-        try:
-            resp = ctx.llm.complete(
-                system=VISUAL_SYSTEM,
-                user=f"Seed: {seed.text}\n\nWrite the visual prompt now.",
-                max_tokens=200,
-            )
-            text = (resp.text or "").strip()
-        except Exception:
-            text = ""
-        return text or seed.text
+        return make_image_prompt(seed, ctx)
 
     def _curator_blurb(
         self, seed: Seed, visual_prompt: str, ctx: ActivityContext
@@ -144,7 +132,15 @@ class ImageRiffActivity:
         """Available image backends in priority order; dry-run uses the stub only."""
         if ctx.dry_run:
             return [g for g in gens.available_for("image") if g.name.startswith("dryrun_")]
-        return [g for g in gens.available_for("image") if not g.name.startswith("dryrun_")]
+        real = [g for g in gens.available_for("image") if not g.name.startswith("dryrun_")]
+        preferred = [g for g in real if g.name == "nano_banana"]
+        if preferred and os.environ.get("DMN_IMAGE_ALLOW_FALLBACKS", "").lower() not in {
+            "1",
+            "true",
+            "yes",
+        }:
+            return preferred
+        return preferred + [g for g in real if g.name != "nano_banana"]
 
     def _pick_backend(self, ctx: ActivityContext):
         """First available image backend; in dry-run, restrict to the stub."""

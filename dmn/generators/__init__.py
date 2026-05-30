@@ -120,6 +120,7 @@ def _register_all() -> None:
         "music_stable_audio",
         "music_suno",
         "video_stub",
+        "video_runway",
         "video_replicate",
     ]:
         try:
