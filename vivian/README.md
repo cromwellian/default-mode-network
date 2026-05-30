@@ -6,6 +6,7 @@ Generated local artifacts based on Vivian's imported default-mode-network profil
 
 - `the-product-sommelier.html` - creative zine with invented interface drinks, field notes, object cards, and a prompt machine.
 - `the-product-sommelier-prompt.md` - source creative brief used to make the Product Sommelier artifact.
+- `the-product-sommelier-video.mp4` - 30-second motion artifact based on the local profile themes.
 - `vivian-curiosity-atlas.html` - interactive atlas of the profile's source themes and evidence.
 - `vivian-dmn-first-artifact.html` - rendered version of the first taste-map artifact.
 - `vivian-dmn-first-artifact.md` - Markdown source for the first taste-map artifact.
@@ -14,8 +15,14 @@ Generated local artifacts based on Vivian's imported default-mode-network profil
 
 - `previews/the-product-sommelier-desktop.png`
 - `previews/the-product-sommelier-mobile.png`
+- `previews/the-product-sommelier-video-preview.png`
 - `previews/vivian-curiosity-atlas-desktop.png`
 - `previews/vivian-curiosity-atlas-mobile.png`
+
+## Video Source
+
+- `video-source/render_product_sommelier.py` - Pillow frame renderer for the motion typography.
+- `video-source/render-product-sommelier.sh` - ffmpeg wrapper that renders frames, encodes MP4, and extracts the preview still.
 
 ## Notes
 
