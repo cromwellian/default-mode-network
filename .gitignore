@@ -39,6 +39,5 @@ data/*
 journal/*
 !journal/.gitkeep
 
-# Local website trailer local scrape cache
-local/trailer-source/site-images/
-local/trailer-source/site-images-manifest.txt
+# Local local-only workspace
+local/
