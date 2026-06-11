@@ -61,7 +61,7 @@ uv run prepare.py --import browser --browsers chrome,arc   # close the browser f
 uv run prepare.py --import youtube,gmail,drive --takeout-dir ~/Downloads/Takeout
 ```
 
-**What's Google Takeout?** Google's export-your-data service. Go to [takeout.google.com](https://takeout.google.com), select YouTube (watch history), Gmail, and/or Drive, export, unzip, and point `--takeout-dir` at the unzipped folder.
+**What's Google Takeout?** Google's export-your-data service. Go to [takeout.google.com](https://takeout.google.com), click **Deselect all**, then tick only YouTube (watch history), Mail, and/or Drive — a small export arrives in minutes, while select-all takes Google days. Export, unzip, and point `--takeout-dir` at the unzipped folder. (Your Chrome history doesn't need Takeout — `--import browser` reads it straight off your machine.)
 
 Your interests are embedded and clustered into multiple "taste clusters" — a polytopia, not a centroid, so "I like Lisp AND fermentation AND polyrhythms" survives. The seed generator samples one cluster *or* two distant ones (cross-pollination). High-dopamine briefs nudge the nearest cluster as you go, so your profile drifts as you read.
 
