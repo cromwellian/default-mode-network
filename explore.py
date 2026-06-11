@@ -334,7 +334,10 @@ def main(
             f"  - {e['dopamine_total']:.3f}  [{e['seed_source']}/{e.get('activity') or 'research'}] "
             f"{e['seed']} -> {e['path']}"
         )
-    console.print(f"\nMorning rollup: [dim]journal/today.html[/]")
+    console.print(
+        "\nBrowse: [dim]journal/index.html[/] · today [dim]journal/today.html[/] · "
+        "health [dim]journal/dashboard.html[/]"
+    )
 
 
 def _pick_seed(

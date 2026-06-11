@@ -9,9 +9,12 @@ def search(query: str, max_results: int = 5) -> list[ResearchItem]:
     if not query:
         return []
     try:
-        from duckduckgo_search import DDGS  # type: ignore
+        from ddgs import DDGS  # type: ignore
     except Exception:
-        return []
+        try:
+            from duckduckgo_search import DDGS  # type: ignore
+        except Exception:
+            return []
     results: list[dict] = []
     try:
         with DDGS() as ddgs:

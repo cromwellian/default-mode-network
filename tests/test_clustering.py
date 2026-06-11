@@ -68,3 +68,16 @@ def test_recency_decay():
     assert taste.recency_decay(0.0) == pytest.approx(1.0)
     assert taste.recency_decay(90.0) == pytest.approx(0.5)
     assert taste.recency_decay(180.0) == pytest.approx(0.25)
+
+
+def test_small_profile_never_ends_up_all_noise():
+    """A fresh interview (~12 interests) must yield usable clusters, not 100% noise (issue #7)."""
+    import numpy as np
+
+    from dmn import taste
+
+    rng = np.random.default_rng(7)
+    vecs = rng.standard_normal((12, 64)).astype(np.float32)
+    result = taste.cluster(vecs, method="hdbscan")
+    assert result.n_noise < len(vecs)
+    assert len(result.centroids) >= 2
