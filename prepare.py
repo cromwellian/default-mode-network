@@ -336,9 +336,10 @@ def main(
         for item in interests[:20]:
             console.print(f"  · [{item['source']}] {item['text'][:120]}")
 
-    console.print("Embedding…")
     texts = [i["text"] for i in interests]
-    vectors = emb.embed(texts)
+    emb.embed(texts[:1])  # first call prints any fallback notice cleanly, pre-spinner
+    with console.status(f"Embedding {len(texts)} interest(s)…"):
+        vectors = emb.embed(texts)
 
     conn = store.connect()
     interest_ids: list[int] = []
@@ -353,17 +354,20 @@ def main(
         )
         interest_ids.append(iid)
 
-    console.print(
-        f"Clustering taste profile ({cluster_method}, recency-weighted)…"
-    )
-    result, weights, synth_labels, is_noise_flags = run_clustering_pipeline(
-        vectors,
-        interests,
-        interest_ids,
-        cluster_method=cluster_method,
-        recency_half_life=recency_half_life,
-        min_cluster_size=min_cluster_size,
-    )
+    with console.status(f"Clustering taste profile ({cluster_method}, recency-weighted)…"):
+        result, weights, synth_labels, is_noise_flags = run_clustering_pipeline(
+            vectors,
+            interests,
+            interest_ids,
+            cluster_method=cluster_method,
+            recency_half_life=recency_half_life,
+            min_cluster_size=min_cluster_size,
+        )
+    if result.method != cluster_method:
+        console.print(
+            f"[yellow]{cluster_method} found no dense clusters here "
+            f"(common for small profiles) — used {result.method} instead.[/]"
+        )
 
     if result.silhouette is not None:
         console.print(f"Silhouette score (non-noise): [bold]{result.silhouette:.3f}[/]")

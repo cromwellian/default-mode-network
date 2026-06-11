@@ -207,7 +207,14 @@ def _cluster_hdbscan(
         return _cluster_kmeans(embeddings, k=None, sample_weight=sample_weight)
 
     n = len(embeddings)
-    mcs = min_cluster_size if min_cluster_size is not None else max(15, n // 80)
+    if min_cluster_size is not None:
+        mcs = min_cluster_size
+    elif n < 60:
+        # The big-data floor (15) would mark a fresh interview's whole profile as
+        # noise, leaving the seed sampler nothing to wander on.
+        mcs = max(2, n // 4)
+    else:
+        mcs = max(15, n // 80)
     normed = _normalize_rows(embeddings.astype(np.float64))
     if sample_weight is not None:
         sw = np.asarray(sample_weight, dtype=np.float64).ravel()
@@ -218,13 +225,17 @@ def _cluster_hdbscan(
 
     clusterer = hdbscan.HDBSCAN(
         min_cluster_size=mcs,
-        min_samples=5,
+        min_samples=min(5, mcs),
         metric="euclidean",
     )
     raw_labels = clusterer.fit_predict(normed)
-    return _build_from_labels(
+    result = _build_from_labels(
         embeddings, raw_labels.astype(int), sample_weight, "hdbscan"
     )
+    if result.n_noise == len(embeddings):
+        # Density found no structure at all; an all-noise profile is useless.
+        return _cluster_kmeans(embeddings, k=None, sample_weight=sample_weight)
+    return result
 
 
 def _cluster_kmeans(

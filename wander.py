@@ -580,7 +580,7 @@ def main(
     session_nodes = store.list_journal_by_run(conn, run_id, limit=1000)
     journal.write_tree_md(session_nodes)
 
-    entries = store.list_journal(conn, limit=500)
+    entries = store.list_journal(conn, limit=max(500, len(session_node_ids)))
     journal.write_index(entries)
     journal.write_today_notebook(entries)
     html_journal.build_html_journal(entries, session_nodes=session_nodes)
@@ -601,8 +601,24 @@ def main(
         f"\n[bold]Wander complete.[/] {n_done} brief(s) "
         f"({pruned_count} pruned, {leaf_count} leaf, {open_count} open). "
         f"best={best_score:.3f}; beam_pruned={beam_pruned_count}; "
-        f"patience_triggered={patience_triggered}. "
-        f"Tree → [dim]journal/tree.html[/]"
+        f"patience_triggered={patience_triggered}."
+    )
+    session_set = set(session_node_ids)
+    top = sorted(
+        (e for e in entries if e.get("id") in session_set),
+        key=lambda e: e.get("dopamine_total") or 0.0,
+        reverse=True,
+    )[:3]
+    if top:
+        console.print("Top dopamine from this session:")
+        for e in top:
+            console.print(
+                f"  - {e['dopamine_total']:.3f}  [{e['seed_source']}/{e.get('activity') or 'research'}] "
+                f"{e['seed']} -> {e['path']}"
+            )
+    console.print(
+        "\nBrowse: [dim]journal/index.html[/] · tree [dim]journal/tree.html[/] · "
+        "health [dim]journal/dashboard.html[/]"
     )
     if report_path:
         console.print(f"[bold]Report →[/] [dim]journal/{Path(report_path).stem}.html[/] (journal/report.html)")

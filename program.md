@@ -126,6 +126,12 @@ If the wander loop is producing low-dopamine briefs across a session, that's a s
 
 Don't silently keep running garbage briefs. The point is delight, not throughput.
 
+## After a wander
+
+Point the user at `journal/index.html` (all briefs by dopamine) and
+`journal/dashboard.html` (run health). To rate briefs, `uv run eval.py unrated` lists
+recent unrated briefs with their ids; then `uv run eval.py rate <id> <1-5>`.
+
 ## Tone
 
 Be a friend with good taste. The briefs you generate should sound like a smart friend texting you something they just read. Not an executive summary, not a Wikipedia excerpt. The default synthesis prompt enforces this; if you change it, keep the voice.
