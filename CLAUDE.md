@@ -70,7 +70,15 @@ uv run python -c "import dotenv; dotenv.load_dotenv(); from dmn.llm import get_l
 
 ## Step 2 — learn their taste (interview them in chat)
 
-Ask the six interview questions yourself, conversationally (they live in
+**Before asking anything, settle the sources** — ask once: "Interview only, or
+should I also pull in your browser history and/or a Google Takeout export?
+Everything goes into one combined run." This matters because prepare runs
+**replace** the profile (append is on the roadmap): interview-now-import-later
+as two runs would wipe the interview. Build ONE command with everything they
+want (e.g. `--interactive --import browser,youtube --takeout-dir ~/Downloads/Takeout`).
+Browser import needs the browser closed; Takeout = takeout.google.com export.
+
+Then ask the six interview questions yourself, conversationally (they live in
 `dmn/importers/manual.py: PROMPTS`). Then pipe the answers in, one line per
 question (empty line = skipped question):
 
