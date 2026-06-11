@@ -51,6 +51,11 @@ class StubLLM:
     name = "stub"
     model = "stub"
 
+    def __init__(self, fallback_reason: Optional[str] = None) -> None:
+        # Set when get_llm() landed here because a real provider failed, so
+        # entry points can tell the user *why* they're in demo mode.
+        self.fallback_reason = fallback_reason
+
     def complete(self, system: str, user: str, max_tokens: int = 1024) -> LLMResponse:
         """Return a deterministic, prompt-derived stub response."""
         snippet = (user or "").strip().splitlines()[0] if user else ""
@@ -81,7 +86,7 @@ class AnthropicLLM:
         self.model = (
             model
             or os.environ.get("DMN_LLM_MODEL")
-            or "claude-sonnet-4-5-20250929"
+            or "claude-sonnet-4-6"
         )
 
     # Above this many output tokens the SDK refuses a non-streaming call ("Streaming is
@@ -203,18 +208,18 @@ def get_llm(provider: str | None = None, dry_run: bool = False):
     if provider in ("ollama", "lmstudio", "vllm"):
         try:
             return LocalOpenAICompatibleLLM(provider)
-        except Exception:
-            return StubLLM()
+        except Exception as e:
+            return StubLLM(f"DMN_LLM_PROVIDER={provider}, but it failed to initialize: {e}")
     if provider == "anthropic":
         try:
             return AnthropicLLM()
-        except Exception:
-            return StubLLM()
+        except Exception as e:
+            return StubLLM(f"DMN_LLM_PROVIDER=anthropic, but it failed to initialize: {e}")
     if provider == "openai":
         try:
             return OpenAILLM()
-        except Exception:
-            return StubLLM()
+        except Exception as e:
+            return StubLLM(f"DMN_LLM_PROVIDER=openai, but it failed to initialize: {e}")
     if os.environ.get("ANTHROPIC_API_KEY"):
         try:
             return AnthropicLLM()
@@ -225,4 +230,97 @@ def get_llm(provider: str | None = None, dry_run: bool = False):
             return OpenAILLM()
         except Exception:
             pass
-    return StubLLM()
+    return StubLLM(
+        "no ANTHROPIC_API_KEY or OPENAI_API_KEY found and no DMN_LLM_PROVIDER set"
+    )
+
+
+# Rough per-iteration cost band for hosted sonnet/4o-class models: ~3 LLM calls
+# of a few thousand tokens each. Honest order-of-magnitude, not a quote.
+_COST_PER_ITER_LOW = 0.02
+_COST_PER_ITER_HIGH = 0.07
+_CALLS_PER_ITER = 3
+
+
+def estimate_cost_note(llm, iterations: int | None = None, minutes: float | None = None) -> str:
+    """One short human line about what a run will cost with this provider."""
+    if llm.name == "stub":
+        return "no API calls (demo mode)"
+    if llm.name in _LOCAL_DEFAULTS:
+        return "local model — free, but slower than a hosted API"
+    iters = iterations if iterations is not None else max(1, round((minutes or 12) * 1.0))
+    lo, hi = iters * _COST_PER_ITER_LOW, iters * _COST_PER_ITER_HIGH
+    return f"≈{iters * _CALLS_PER_ITER} LLM calls, roughly ${lo:.2f}–${hi:.2f}"
+
+
+def preflight(llm) -> str | None:
+    """Make one cheap completion to fail fast on bad keys/models/servers.
+
+    Returns a friendly, actionable error string, or None when the provider works.
+    """
+    if llm.name == "stub":
+        return None
+    try:
+        llm.complete("Reply with the single word: ok", "ok?", max_tokens=1)
+        return None
+    except Exception as e:
+        s = str(e)
+        low = s.lower()
+        if any(t in low for t in ("401", "authentication", "unauthorized", "api key", "api_key")):
+            var = "OPENAI_API_KEY" if llm.name == "openai" else "ANTHROPIC_API_KEY"
+            return (
+                f"{llm.name}: the API rejected your key. Check {var} in .env "
+                f"(detail: {s[:120]})"
+            )
+        if any(t in low for t in ("404", "not_found", "not found", "does not exist")):
+            return (
+                f"{llm.name}: model '{llm.model}' is unavailable. Set DMN_LLM_MODEL to a "
+                f"current model or unset it for the default (detail: {s[:120]})"
+            )
+        if llm.name in _LOCAL_DEFAULTS:
+            return (
+                f"{llm.name}: can't reach the local server. "
+                f"{_LOCAL_DEFAULTS[llm.name]['hint']} (detail: {s[:80]})"
+            )
+        return f"{llm.name}: provider check failed: {s[:160]}"
+
+
+def announce_and_preflight(
+    llm,
+    console,
+    dry_run: bool = False,
+    iterations: int | None = None,
+    minutes: float | None = None,
+) -> None:
+    """Print the provider banner, then fail fast (or warn loudly) before any real run.
+
+    Raises SystemExit(1) when the configured provider doesn't work, or when the user
+    declines to continue an interactive non-dry run that fell back to the stub LLM.
+    """
+    console.print(
+        f"LLM provider: [bold]{llm.name}[/] · model [bold]{llm.model}[/] · "
+        f"{estimate_cost_note(llm, iterations=iterations, minutes=minutes)}"
+    )
+    if dry_run:
+        return
+    if llm.name == "stub":
+        console.print(
+            "[red]⚠ No working LLM — this run will produce templated demo briefs, "
+            "not real research.[/]"
+        )
+        reason = getattr(llm, "fallback_reason", None)
+        if reason:
+            console.print(f"[red]  why: {reason}[/]")
+        console.print(
+            "[red]  Fix: put ANTHROPIC_API_KEY in .env, or set DMN_LLM_PROVIDER=ollama "
+            "for a local model. Use --dry-run if demo mode is what you want.[/]"
+        )
+        if sys.stdin.isatty():
+            ans = input("Continue in demo mode anyway? [y/N] ").strip().lower()
+            if ans not in ("y", "yes"):
+                raise SystemExit(1)
+        return
+    err = preflight(llm)
+    if err:
+        console.print(f"[red]{err}[/]")
+        raise SystemExit(1)

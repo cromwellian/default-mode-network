@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import random
 import re
+import signal
 from typing import Callable, Optional
 
 from dmn.tools import ResearchItem
@@ -21,6 +22,26 @@ from dmn.tools import get as get_tool
 
 # Tools that work without API keys; used when --dry-run is set.
 SAFE_TOOLS = ["wikipedia", "websearch", "hackernews"]
+
+
+def install_graceful_sigint(console=None) -> dict:
+    """First Ctrl-C requests a graceful stop (loops check the returned flag and finish
+    the current iteration, so SQLite and the journal stay consistent); a second Ctrl-C
+    raises KeyboardInterrupt as usual. Returns {"stop": bool} for loops to poll."""
+    state = {"stop": False}
+
+    def _handler(signum, frame):
+        if state["stop"]:
+            raise KeyboardInterrupt
+        state["stop"] = True
+        if console is not None:
+            console.print(
+                "\n[yellow]Finishing this iteration, then stopping — progress will be "
+                "saved. (Ctrl-C again to force quit.)[/]"
+            )
+
+    signal.signal(signal.SIGINT, _handler)
+    return state
 
 SYNTHESIS_SYSTEM = (
     "You are the inner voice of a wandering mind. Synthesize the gathered findings into a "
