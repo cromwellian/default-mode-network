@@ -40,6 +40,7 @@ dev = ["pytest>=8.0.0"]
 modal = ["modal>=0.64.0", "fastapi[standard]>=0.115.0", "python-multipart>=0.0.9"]
 
 [project.scripts]
+dmn-setup = "dmn.setup_wizard:run"
 dmn-prepare = "dmn.cli:prepare"
 dmn-explore = "dmn.cli:explore"
 dmn-wander = "dmn.cli:wander"
