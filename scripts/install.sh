@@ -19,7 +19,12 @@ fi
 UV="uv"
 if ! command -v uv >/dev/null 2>&1; then
   echo "Installing uv (the only tool DMN needs - it manages Python for you)..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+  # Download-then-run (not curl|sh) so a dropped connection fails loudly under set -e.
+  # Trust note: this fetches and runs Astral's official installer, unpinned.
+  UV_INSTALLER="$(mktemp)"
+  curl -LsSf -o "$UV_INSTALLER" https://astral.sh/uv/install.sh
+  sh "$UV_INSTALLER"
+  rm -f "$UV_INSTALLER"
   # The installer drops uv in ~/.local/bin, which may not be on PATH yet.
   UV="$HOME/.local/bin/uv"
   command -v "$UV" >/dev/null 2>&1 || UV="$HOME/.cargo/bin/uv"
@@ -42,9 +47,11 @@ echo "Installing dependencies..."
 
 # Under `curl | sh`, stdin is the script pipe even in a real terminal, so probe
 # /dev/tty (the controlling terminal) and hand it to the interactive wizard.
+# The subshell probe actually opens /dev/tty — [ -r /dev/tty ] alone passes in
+# sessions with no controlling terminal (setsid) and then the redirect ENXIOs.
 if [ -t 0 ]; then
   exec "$UV" run dmn-setup
-elif [ -t 1 ] && [ -r /dev/tty ]; then
+elif [ -t 1 ] && (exec < /dev/tty) 2>/dev/null; then
   exec "$UV" run dmn-setup < /dev/tty
 fi
 echo

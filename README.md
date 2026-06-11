@@ -8,14 +8,16 @@ The idea: build a small, local taste profile of *you* (interests, recent obsessi
 
 Pick your door — all three end in the same place:
 
-**A. You use an AI tool (easiest).** Get this folder onto your machine (door B does
-that too), open it in Claude Code, Codex, or Cursor, and say **"set me up"**. The
-agent reads `CLAUDE.md`/`AGENTS.md` and walks you through everything in chat —
-checks your tools, interviews you about your taste, runs the first wander, shows
-you the results. No docs, no flags.
+**A. You use an AI tool (easiest).** First get this folder onto your machine —
+run the door-B one-liner, or GitHub → green **Code** button → **Download ZIP** and
+unzip it. Then open the folder in Claude Code, Codex, or Cursor and say
+**"set me up"**. The agent reads `CLAUDE.md`/`AGENTS.md` and walks you through
+everything in chat — checks your tools, interviews you about your taste, runs the
+first wander, shows you the results. No docs, no flags.
 
 **B. One line in a terminal.** Installs uv if needed (uv brings its own Python),
-clones, and launches the guided wizard:
+clones, and launches the guided wizard ([read the script](scripts/install.sh) —
+it's 50 lines):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cromwellian/default-mode-network/main/scripts/install.sh | sh
