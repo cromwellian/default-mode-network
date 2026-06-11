@@ -49,7 +49,11 @@ def _machine_arch() -> str:
                 text=True,
                 timeout=5,
             ).stdout
-            if probe.splitlines()[:1] == ["1"] or "Apple" in probe:
+            lines = probe.splitlines()
+            # Two independent signals: the arm64 oid, or a brand line like
+            # "Apple M2 Max" (covers the oid query failing). Prefix-anchored so
+            # no Intel brand string can ever match.
+            if lines[:1] == ["1"] or any(l.startswith("Apple ") for l in lines):
                 return "arm64"
         except Exception:
             pass
