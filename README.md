@@ -9,7 +9,7 @@ The idea: build a small, local taste profile of *you* (interests, recent obsessi
 In your AI tool (Claude Code, Codex, Cursor), paste:
 
 ```text
-Clone https://github.com/cromwellian/default-mode-network and set me up — follow its CLAUDE.md.
+Clone https://github.com/cromwellian/default-mode-network and set me up — follow its AGENTS.md.
 ```
 
 Or in a terminal ([the script](scripts/install.sh), 50 lines):
