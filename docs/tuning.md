@@ -82,6 +82,24 @@ with `local-model`; `vllm` → `http://localhost:8000/v1`. Override with
 `DMN_LLM_BASE_URL` / `DMN_LLM_MODEL`. On startup DMN health-checks the base URL,
 validates your key/model with one tiny call, and prints a cost estimate.
 
+### Using a gateway (Vercel AI Gateway, OpenRouter)
+
+Any OpenAI-compatible gateway works through the `openai` provider — one key,
+many models, provider-side fallbacks and spend dashboards:
+
+```bash
+DMN_LLM_PROVIDER=openai \
+OPENAI_API_KEY=<your-gateway-key> \
+DMN_LLM_BASE_URL=https://ai-gateway.vercel.sh/v1 \
+DMN_LLM_MODEL=anthropic/claude-sonnet-4-6 \
+uv run explore.py --iterations 3
+```
+
+(OpenRouter: `DMN_LLM_BASE_URL=https://openrouter.ai/api/v1`, model ids like
+`anthropic/claude-sonnet-4-6`.) The startup preflight validates the gateway key
+and model with one tiny call, same as a direct provider. The default newcomer
+path remains one Anthropic key — gateways are bring-your-own.
+
 ## Embeddings
 
 `DMN_EMBEDDINGS`: `st` (default; local sentence-transformers, needs

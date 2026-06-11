@@ -137,3 +137,21 @@ def test_graceful_sigint_two_stage():
             handler(signal.SIGINT, None)
     finally:
         signal.signal(signal.SIGINT, old)
+
+
+def test_openai_provider_honors_gateway_base_url(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-gateway-test")
+    monkeypatch.setenv("DMN_LLM_BASE_URL", "https://ai-gateway.vercel.sh/v1")
+    monkeypatch.setenv("DMN_LLM_MODEL", "anthropic/claude-sonnet-4-6")
+    llm = get_llm("openai")
+    assert llm.name == "openai"
+    assert str(llm.client.base_url).rstrip("/") == "https://ai-gateway.vercel.sh/v1"
+    assert llm.model == "anthropic/claude-sonnet-4-6"
+
+
+def test_openai_provider_default_base_url_untouched(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.delenv("DMN_LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("DMN_LLM_MODEL", raising=False)
+    llm = get_llm("openai")
+    assert "api.openai.com" in str(llm.client.base_url)
