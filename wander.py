@@ -37,7 +37,7 @@ from dmn import __version__
 from dmn import activities as acts
 from dmn import embeddings as emb
 from dmn import generators as gens
-from dmn import html_journal, journal, seeds, store, taste, tree
+from dmn import html_journal, journal, portability, seeds, store, taste, tree
 from dmn import report as report_mod
 from dmn.activities import ActivityContext, ActivityResult
 from dmn.llm import get_llm
@@ -232,6 +232,10 @@ def main(
             "[red]No taste profile found. Run `uv run prepare.py --interactive` "
             "(or `--dry-run`) first.[/]"
         )
+        raise typer.Exit(1)
+    mismatch = portability.profile_embedding_mismatch(conn)
+    if mismatch:
+        console.print(f"[red]{mismatch}[/]")
         raise typer.Exit(1)
 
     centroids: list[np.ndarray] = [

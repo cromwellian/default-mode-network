@@ -14,31 +14,23 @@ _MODEL_CACHE: dict = {}
 _warned_fallback = False
 
 
-def _st_available() -> bool:
-    """True if the sentence-transformers package can be imported."""
-    try:
-        import sentence_transformers  # type: ignore  # noqa: F401
-    except Exception:
-        return False
-    return True
-
-
 def effective_backend() -> str:
     """The backend embed() will actually use: "st", "openai", or "hash"."""
     backend = os.environ.get("DMN_EMBEDDINGS", "st").lower()
     if backend in ("openai", "hash"):
         return backend
-    return "st" if _st_available() else "hash"
+    return "st" if _get_st_model() is not None else "hash"
 
 
 def _get_st_model():
-    """Return a cached sentence-transformers model, or None if package missing."""
-    try:
-        from sentence_transformers import SentenceTransformer  # type: ignore
-    except Exception:
-        return None
+    """Return a cached sentence-transformers model, or None if it can't be loaded."""
     if "st" not in _MODEL_CACHE:
-        _MODEL_CACHE["st"] = SentenceTransformer("all-MiniLM-L6-v2")
+        try:
+            from sentence_transformers import SentenceTransformer  # type: ignore
+
+            _MODEL_CACHE["st"] = SentenceTransformer("all-MiniLM-L6-v2")
+        except Exception:
+            _MODEL_CACHE["st"] = None
     return _MODEL_CACHE["st"]
 
 
