@@ -552,8 +552,10 @@ def main(
     )
 
     if result.n_noise > 0 and is_noise_flags and is_noise_flags[-1]:
-        if cluster_themes[-1].startswith("cluster-"):
-            cluster_themes[-1] = "ambient / unclustered"
+        # The noise bucket is a heterogeneous catch-all, not a taste — never present
+        # it under an LLM-synthesized theme (a 78%-noise import once read as the
+        # user's "dominant interest"). Seeds skip it except the serendipity draw.
+        cluster_themes[-1] = "ambient / unclustered (catch-all — seeds skip this)"
         if cluster_metas:
             cluster_metas[-1] = cluster_metas[-1] or {}
             cluster_metas[-1]["theme"] = "ambient / unclustered"

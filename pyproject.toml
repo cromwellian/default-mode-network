@@ -44,7 +44,7 @@ dmn-setup = "dmn.setup_wizard:run"
 dmn-prepare = "dmn.cli:prepare"
 dmn-explore = "dmn.cli:explore"
 dmn-wander = "dmn.cli:wander"
-dmn-profile = "profile:app"
+dmn-profile = "profiles:app"
 dmn-journal = "journal:app"
 dmn-eval = "eval:app"
 
@@ -63,6 +63,16 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["dmn"]
 
+[tool.hatch.build.targets.wheel.force-include]
+# Console scripts target these top-level modules; without force-include a wheel
+# install (uvx, pip) ships dmn/ only and every dmn-* entry point breaks.
+"prepare.py" = "prepare.py"
+"explore.py" = "explore.py"
+"wander.py" = "wander.py"
+"journal.py" = "journal.py"
+"profiles.py" = "profiles.py"
+"eval.py" = "eval.py"
+
 [tool.hatch.build.targets.sdist]
 include = [
     "dmn/",
@@ -70,7 +80,7 @@ include = [
     "explore.py",
     "wander.py",
     "journal.py",
-    "profile.py",
+    "profiles.py",
     "eval.py",
     "program.md",
     "SKILL.md",

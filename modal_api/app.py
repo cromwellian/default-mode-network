@@ -45,7 +45,7 @@ dmn_image = (
     .add_local_file(str(REPO_ROOT / "wander.py"), remote_path="/root/wander.py")
     .add_local_file(str(REPO_ROOT / "explore.py"), remote_path="/root/explore.py")
     .add_local_file(str(REPO_ROOT / "prepare.py"), remote_path="/root/prepare.py")
-    .add_local_file(str(REPO_ROOT / "profile.py"), remote_path="/root/profile.py")
+    .add_local_file(str(REPO_ROOT / "profiles.py"), remote_path="/root/profile.py")
     .add_local_file(str(REPO_ROOT / "journal.py"), remote_path="/root/journal.py")
     .add_local_dir(str(REPO_ROOT / "modal_api"), remote_path="/root/modal_api")
 )

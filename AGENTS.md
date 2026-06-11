@@ -78,8 +78,9 @@ The walk:
 1. **Interview** — 6 questions about what they love right now. (Most people: yes.)
 2. **Browser history** — explain before asking: DMN reads the browser's local
    database (Chrome/Arc/Brave/Edge/Firefox/Safari) as a read-only copy, processed
-   on this machine; it holds roughly the **last 90 days**; the browser must be
-   closed; noise (homepages, search results, work-tool pages) should be filtered.
+   on this machine; it holds roughly the **last 90 days**; it works even while
+   the browser is open (a temp copy is read) — close it only if the read fails;
+   noise (homepages, search results, work-tool pages) is filtered with a report.
 3. **YouTube watch history** — the richest consumption signal. Needs a Google
    Takeout folder (takeout.google.com → **Deselect all → tick YouTube** (and
    **Chrome** for deep browsing history) → minutes, not days; select-all takes

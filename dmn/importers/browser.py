@@ -395,11 +395,20 @@ def import_history_with_stats(
         try:
             raw = _read_raw(path, b, limit)
         except Exception as e:
-            print(
-                f"[dmn] {b}: couldn't read history (is {b} running? close it and "
-                f"retry): {e}",
-                file=sys.stderr,
-            )
+            tcc = isinstance(e, PermissionError) or "Operation not permitted" in str(e)
+            if tcc and b == "safari":
+                print(
+                    f"[dmn] {b}: macOS blocked the read (TCC). Grant your terminal "
+                    "Full Disk Access (System Settings → Privacy & Security → "
+                    f"Full Disk Access), or skip {b}. Closing {b} won't help.",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"[dmn] {b}: couldn't read history (is {b} running? close it and "
+                    f"retry): {e}",
+                    file=sys.stderr,
+                )
             stats[b] = {
                 "raw": 0,
                 "kept": 0,

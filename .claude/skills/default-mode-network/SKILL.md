@@ -20,8 +20,8 @@ Quick reference:
 - `uv run explore.py --dry-run --iterations 2` — no-API-key smoke test
 - `uv run explore.py --generate --modalities image,music` — attach generative-media artifacts
 - `uv run explore.py --seed "freetext question"` — single explicit seed override
-- `uv run profile.py export --out me.dmn.json` — share / back up the taste profile
-- `uv run profile.py import friend.dmn.json --replace` — load someone else's profile
+- `uv run profiles.py export --out me.dmn.json` — share / back up the taste profile
+- `uv run profiles.py import friend.dmn.json --replace` — load someone else's profile
 
 LLM provider via `DMN_LLM_PROVIDER`: `anthropic`, `openai`, `ollama`, `lmstudio`, `stub`.
 For fully-local wandering use `ollama` or `lmstudio`.
