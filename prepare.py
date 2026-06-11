@@ -337,6 +337,7 @@ def main(
             console.print(f"  · [{item['source']}] {item['text'][:120]}")
 
     texts = [i["text"] for i in interests]
+    emb.embed(texts[:1])  # first call prints any fallback notice cleanly, pre-spinner
     with console.status(f"Embedding {len(texts)} interest(s)…"):
         vectors = emb.embed(texts)
 

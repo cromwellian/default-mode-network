@@ -415,7 +415,7 @@ def write_brief_html(
         rating = entry.get("user_rating")
     if rating is not None:
         tags.append(f'<span class="chip chip-muted">rated {float(rating):.1f}/5</span>')
-    if "[stub-llm brief]" in body:
+    if body.lstrip().startswith("[stub-llm brief]"):
         tags.append('<span class="chip chip-muted">demo output — not real research</span>')
 
     breakdown = " · ".join(

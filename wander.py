@@ -580,7 +580,7 @@ def main(
     session_nodes = store.list_journal_by_run(conn, run_id, limit=1000)
     journal.write_tree_md(session_nodes)
 
-    entries = store.list_journal(conn, limit=500)
+    entries = store.list_journal(conn, limit=max(500, len(session_node_ids)))
     journal.write_index(entries)
     journal.write_today_notebook(entries)
     html_journal.build_html_journal(entries, session_nodes=session_nodes)
