@@ -220,18 +220,20 @@ def get_llm(provider: str | None = None, dry_run: bool = False):
             return OpenAILLM()
         except Exception as e:
             return StubLLM(f"DMN_LLM_PROVIDER=openai, but it failed to initialize: {e}")
+    reasons = []
     if os.environ.get("ANTHROPIC_API_KEY"):
         try:
             return AnthropicLLM()
-        except Exception:
-            pass
+        except Exception as e:
+            reasons.append(f"anthropic init failed: {e}")
     if os.environ.get("OPENAI_API_KEY"):
         try:
             return OpenAILLM()
-        except Exception:
-            pass
+        except Exception as e:
+            reasons.append(f"openai init failed: {e}")
     return StubLLM(
-        "no ANTHROPIC_API_KEY or OPENAI_API_KEY found and no DMN_LLM_PROVIDER set"
+        "; ".join(reasons)
+        or "no ANTHROPIC_API_KEY or OPENAI_API_KEY found and no DMN_LLM_PROVIDER set"
     )
 
 
@@ -253,36 +255,66 @@ def estimate_cost_note(llm, iterations: int | None = None, minutes: float | None
     return f"≈{iters * _CALLS_PER_ITER} LLM calls, roughly ${lo:.2f}–${hi:.2f}"
 
 
-def preflight(llm) -> str | None:
+_PREFLIGHT_TIMEOUT_S = 15.0
+
+
+def preflight(llm, timeout_s: float = _PREFLIGHT_TIMEOUT_S) -> str | None:
     """Make one cheap completion to fail fast on bad keys/models/servers.
 
     Returns a friendly, actionable error string, or None when the provider works.
+    The probe runs in a daemon thread so a stalled server can't hang startup.
     """
     if llm.name == "stub":
         return None
-    try:
-        llm.complete("Reply with the single word: ok", "ok?", max_tokens=1)
+    import threading
+
+    outcome: dict = {}
+
+    def _ping() -> None:
+        try:
+            llm.complete("Reply with the single word: ok", "ok?", max_tokens=1)
+            outcome["ok"] = True
+        except Exception as e:  # classified below, on the main thread
+            outcome["err"] = e
+
+    t = threading.Thread(target=_ping, daemon=True)
+    t.start()
+    t.join(timeout_s)
+    if t.is_alive():
+        return (
+            f"{llm.name}: no response within {timeout_s:.0f}s — network problem or "
+            f"stalled server (model '{llm.model}')"
+        )
+    if "err" not in outcome:
         return None
-    except Exception as e:
-        s = str(e)
-        low = s.lower()
-        if any(t in low for t in ("401", "authentication", "unauthorized", "api key", "api_key")):
-            var = "OPENAI_API_KEY" if llm.name == "openai" else "ANTHROPIC_API_KEY"
-            return (
-                f"{llm.name}: the API rejected your key. Check {var} in .env "
-                f"(detail: {s[:120]})"
-            )
-        if any(t in low for t in ("404", "not_found", "not found", "does not exist")):
-            return (
-                f"{llm.name}: model '{llm.model}' is unavailable. Set DMN_LLM_MODEL to a "
-                f"current model or unset it for the default (detail: {s[:120]})"
-            )
+    s = str(outcome["err"])
+    low = s.lower()
+    # Connection-level failures first: for local providers they're the common case,
+    # and their messages can contain auth-ish words ("Proxy Authentication Required").
+    if any(t in low for t in ("connect", "refused", "timed out", "timeout", "unreachable")):
         if llm.name in _LOCAL_DEFAULTS:
             return (
                 f"{llm.name}: can't reach the local server. "
                 f"{_LOCAL_DEFAULTS[llm.name]['hint']} (detail: {s[:80]})"
             )
-        return f"{llm.name}: provider check failed: {s[:160]}"
+        return f"{llm.name}: can't reach the API (network problem? detail: {s[:120]})"
+    if any(t in low for t in ("401", "authentication_error", "invalid x-api-key", "incorrect api key", "unauthorized", "api key", "api_key")):
+        var = "OPENAI_API_KEY" if llm.name == "openai" else "ANTHROPIC_API_KEY"
+        return (
+            f"{llm.name}: the API rejected your key. Check {var} in .env "
+            f"(detail: {s[:120]})"
+        )
+    if any(t in low for t in ("404", "not_found", "not found", "does not exist")):
+        return (
+            f"{llm.name}: model '{llm.model}' is unavailable. Set DMN_LLM_MODEL to a "
+            f"current model or unset it for the default (detail: {s[:120]})"
+        )
+    if llm.name in _LOCAL_DEFAULTS:
+        return (
+            f"{llm.name}: can't reach the local server. "
+            f"{_LOCAL_DEFAULTS[llm.name]['hint']} (detail: {s[:80]})"
+        )
+    return f"{llm.name}: provider check failed: {s[:160]}"
 
 
 def announce_and_preflight(

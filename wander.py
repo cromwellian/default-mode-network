@@ -389,6 +389,8 @@ def main(
             console.print("[yellow]patience triggered; restarting from a fresh root[/]")
             patience_restarts += 1
             stale_expansions = 0
+            if stop["stop"]:
+                break
             root_seed = _pick_root_seed(clusters, llm, rng, focus_cluster=_next_root_focus())
             child_id, score, _ = _expand_brief(
                 conn=conn,
@@ -423,7 +425,7 @@ def main(
             continue
 
         if frontier.size() == 0 or rng.random() < restart_prob:
-            if iterations is not None and n_done >= iterations:
+            if stop["stop"] or (iterations is not None and n_done >= iterations):
                 break
             console.print("[dim]restarting from fresh cluster-seeded root[/]")
             root_seed = _pick_root_seed(clusters, llm, rng, focus_cluster=_next_root_focus())
@@ -485,6 +487,8 @@ def main(
         children: list[tuple[int, float, np.ndarray]] = []
         expansion_best_before = best_score
         for op in ops:
+            if stop["stop"]:
+                break
             if iterations is not None and n_done >= iterations:
                 break
             if deadline is not None and time.time() >= deadline:

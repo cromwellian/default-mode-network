@@ -48,6 +48,26 @@ def test_preflight_local_server_hint():
     assert "ollama" in msg and "serve" in msg.lower()
 
 
+def test_preflight_hosted_network_error_is_not_blamed_on_key():
+    msg = preflight(_FailingLLM("anthropic", "Connection timed out via proxy authentication"))
+    assert "network" in msg.lower()
+    assert "rejected" not in msg
+
+
+def test_preflight_times_out_on_stalled_server():
+    import time
+
+    class _HangingLLM:
+        name = "anthropic"
+        model = "claude-sonnet-4-6"
+
+        def complete(self, system, user, max_tokens=1024):
+            time.sleep(5)
+
+    msg = preflight(_HangingLLM(), timeout_s=0.2)
+    assert msg is not None and "no response" in msg
+
+
 def test_get_llm_records_why_it_fell_back_to_stub(monkeypatch):
     for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DMN_LLM_PROVIDER"):
         monkeypatch.delenv(var, raising=False)
