@@ -22,6 +22,7 @@ import math
 import re
 import shutil
 import sqlite3
+import sys
 import tempfile
 import time
 from collections import Counter
@@ -276,6 +277,11 @@ def import_history_with_stats(
     for b in browsers:
         path = _firefox_path() if b == "firefox" else PROFILES.get(b)
         if not path or not path.exists():
+            print(
+                f"[dmn] {b}: no history database found"
+                + (f" at {path}" if path else " (unsupported browser?)"),
+                file=sys.stderr,
+            )
             stats[b] = {
                 "raw": 0,
                 "kept": 0,
@@ -286,7 +292,12 @@ def import_history_with_stats(
             continue
         try:
             raw = _read_raw(path, b, limit)
-        except Exception:
+        except Exception as e:
+            print(
+                f"[dmn] {b}: couldn't read history (is {b} running? close it and "
+                f"retry): {e}",
+                file=sys.stderr,
+            )
             stats[b] = {
                 "raw": 0,
                 "kept": 0,

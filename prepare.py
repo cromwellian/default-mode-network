@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -252,6 +253,14 @@ def main(
 
     interests: list[dict] = []
     sources = [s.strip() for s in import_sources.split(",") if s.strip()]
+    known_sources = {"browser", "youtube", "gmail", "drive", "twitter", "readwise"}
+    unknown_sources = [s for s in sources if s not in known_sources]
+    if unknown_sources:
+        console.print(
+            f"[red]Unknown --import source(s): {', '.join(unknown_sources)}. "
+            f"Valid: {', '.join(sorted(known_sources))}.[/]"
+        )
+        raise typer.Exit(code=1)
 
     if dry_run and not interactive and not sources:
         console.print(
@@ -336,12 +345,24 @@ def main(
         for item in interests[:20]:
             console.print(f"  · [{item['source']}] {item['text'][:120]}")
 
+    conn = store.connect()
+    existing = store.list_interests(conn)
+    if existing:
+        console.print(
+            f"[yellow]This replaces your existing profile ({len(existing)} interests) "
+            f"with the {len(interests)} item(s) just collected. Your journal is kept.[/]"
+        )
+        if sys.stdin.isatty() and not typer.confirm("Replace it?", default=True):
+            console.print("Kept the existing profile — nothing was changed.")
+            raise typer.Exit(0)
+        conn.execute("DELETE FROM interests")
+        conn.commit()
+
     texts = [i["text"] for i in interests]
     emb.embed(texts[:1])  # first call prints any fallback notice cleanly, pre-spinner
     with console.status(f"Embedding {len(texts)} interest(s)…"):
         vectors = emb.embed(texts)
 
-    conn = store.connect()
     interest_ids: list[int] = []
     for item, v in zip(interests, vectors):
         iid = store.add_interest(

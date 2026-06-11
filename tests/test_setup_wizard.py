@@ -66,3 +66,17 @@ def test_env_file_is_private(tmp_path):
     p = tmp_path / ".env"
     update_env_file({"ANTHROPIC_API_KEY": "sk-test"}, path=p)
     assert (p.stat().st_mode & 0o777) == 0o600
+
+
+def test_interview_numbers_prompts_and_echoes_captured_pieces():
+    from dmn.importers import manual
+
+    fed = iter(["fermentation, jazz piano", "", "x", "", "", ""])
+    seen: list[str] = []
+    answers = manual.interview(input_fn=lambda q: (seen.append(q), next(fed))[1], output_fn=seen.append)
+    texts = [a["text"] for a in answers]
+    assert texts == ["fermentation", "jazz piano"]
+    joined = "\n".join(seen)
+    assert "[1/6]" in joined and "[6/6]" in joined
+    assert "noted: fermentation; jazz piano" in joined
+    assert "too short" in joined

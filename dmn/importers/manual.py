@@ -19,14 +19,19 @@ def interview(input_fn=input, output_fn=print) -> list[dict]:
     output_fn(
         "DMN — taste interview. Press Enter to skip a prompt; Ctrl-C to stop early."
     )
-    for q in PROMPTS:
+    for i, q in enumerate(PROMPTS, 1):
         try:
-            ans = input_fn(f"\n  > {q}\n    ").strip()
+            ans = input_fn(f"\n  [{i}/{len(PROMPTS)}] {q}\n    ").strip()
         except (EOFError, KeyboardInterrupt):
             break
         if not ans:
             continue
-        for piece in _split_answer(ans):
+        pieces = _split_answer(ans)
+        if pieces:
+            output_fn(f"    noted: {'; '.join(pieces)}")
+        else:
+            output_fn("    (too short to use — skipped)")
+        for piece in pieces:
             answers.append({"text": piece, "source": "manual"})
     return answers
 
