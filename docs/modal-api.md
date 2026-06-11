@@ -8,8 +8,8 @@ URLs. All profiles and run artifacts are scoped under a **caller-provided `user_
 
 ```bash
 cp .env.example .env               # fill in ANTHROPIC_API_KEY, HF_TOKEN, etc.
+uv sync --extra modal              # installs the modal CLI (used by the next step)
 ./scripts/modal_secrets_setup.sh   # loads .env → Modal secret "dmn-env"
-uv sync --extra modal
 uv run modal deploy modal_api/app.py
 ```
 

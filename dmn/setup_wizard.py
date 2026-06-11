@@ -129,7 +129,7 @@ def _confirm(prompt: str, default: bool = True) -> bool:
 def _setup_anthropic() -> bool:
     console.print(
         "\nGet a key at [bold]https://console.anthropic.com[/] → API keys. "
-        "A wander costs roughly $0.30–0.80."
+        "A wander costs roughly $0.25–0.85."
     )
     for _ in range(3):
         key = getpass("Paste your ANTHROPIC_API_KEY (input hidden): ").strip()
@@ -281,7 +281,7 @@ def _run() -> None:
 
     console.print("\nHow should DMN think?")
     console.print(
-        "  1) [bold]Claude API key[/] — best quality, ≈$0.30–0.80 per wander (recommended)"
+        "  1) [bold]Claude API key[/] — best quality, ≈$0.25–0.85 per wander (recommended)"
     )
     local_suffix = f" — would use [bold]{local_model}[/]" if local_model else ""
     console.print(f"  2) Local model via Ollama — free and private{local_suffix}")
