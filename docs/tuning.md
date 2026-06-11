@@ -85,7 +85,10 @@ validates your key/model with one tiny call, and prints a cost estimate.
 ## Embeddings
 
 `DMN_EMBEDDINGS`: `st` (default; local sentence-transformers, needs
-`uv sync --extra embeddings`), `openai` (`text-embedding-3-small`, needs
+`uv sync --extra embeddings` — if that fails on an Apple-silicon Mac with a
+Rosetta/x86 toolchain (`platform.machine()` says x86_64 but `sysctl -n
+machdep.cpu.brand_string` says Apple), pin a native interpreter first:
+`uv python pin cpython-3.13-macos-aarch64-none`, then re-sync), `openai` (`text-embedding-3-small`, needs
 `OPENAI_API_KEY`), or `hash` (no-dependency deterministic fallback). When `st` is
 requested but not installed, DMN falls back to `hash` with a one-time notice. Profiles
 are stamped with the backend that embedded them; explore/wander refuse to run when the

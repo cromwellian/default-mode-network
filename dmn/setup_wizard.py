@@ -154,8 +154,11 @@ def _confirm(prompt: str, default: bool = True) -> bool:
 
 def _setup_anthropic() -> bool:
     console.print(
-        "\nGet a key at [bold]https://console.anthropic.com[/] → API keys. "
-        "A wander costs roughly $0.25–0.85."
+        "\nNever made an API key? Two minutes: [bold]console.anthropic.com[/] → sign "
+        "in → Settings → Billing (needs a card; $5 of credits is plenty) → API Keys "
+        "→ Create Key → copy it (it's shown once). A wander costs roughly $0.25–0.85.\n"
+        "No card, or rather not? Ctrl-C and re-run — the local-model and demo options "
+        "are equally valid answers."
     )
     for _ in range(3):
         key = getpass("Paste your ANTHROPIC_API_KEY (input hidden): ").strip()
@@ -399,10 +402,14 @@ def _run() -> None:
 
     console.print("\nHow should DMN think?")
     console.print(
-        "  1) [bold]Claude API key[/] — best quality, ≈$0.25–0.85 per wander (recommended)"
+        "  1) [bold]Claude API key[/] — best quality, ≈$0.25–0.85 per wander "
+        "(recommended; never made a key? option 1 walks you through it)"
     )
     local_suffix = f" — would use [bold]{local_model}[/]" if local_model else ""
-    console.print(f"  2) Local model via Ollama — free and private{local_suffix}")
+    console.print(
+        f"  2) Local model via Ollama — free and private{local_suffix} "
+        "(a full answer if you don't have or don't want an API key)"
+    )
     console.print(f"     [dim]{local_note}[/]")
     console.print("  3) Demo mode — no key; templated briefs, just to see the plumbing")
     choice = _ask("Choose 1, 2 or 3:", default="1")
