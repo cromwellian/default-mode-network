@@ -11,7 +11,7 @@ The full agent instructions live in `program.md` at the repo root. **Read `progr
 
 Quick reference:
 
-- `uv run prepare.py --interactive` — first-run cold-start interview
+- `uv run prepare.py --interactive` — first-run cold-start interview (agents: your shell is non-interactive — ask the questions in chat and pipe the answers in, one line each; see program.md Setup)
 - `uv run prepare.py --dry-run` — synthetic profile, no input needed
 - `uv run prepare.py --import browser,youtube,gmail,drive,twitter,readwise [--takeout-dir …]` — importers
 - `uv run explore.py` — one wandering session, default 12-minute wall-clock budget
