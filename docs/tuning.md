@@ -100,6 +100,11 @@ uv run explore.py --iterations 3
 and model with one tiny call, same as a direct provider. The default newcomer
 path remains one Anthropic key — gateways are bring-your-own.
 
+**Caveat:** `DMN_LLM_BASE_URL` is shared with the local providers (it's also how
+you point `ollama`/`lmstudio` at a custom host). Set it per-run as above rather
+than persisting it in `.env`, or a later `DMN_LLM_PROVIDER=ollama` run would be
+aimed at your gateway. The preflight catches the breakage in seconds either way.
+
 ## Embeddings
 
 `DMN_EMBEDDINGS`: `st` (default; local sentence-transformers, needs
