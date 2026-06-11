@@ -1,6 +1,6 @@
 [project]
 name = "default-mode-network"
-version = "0.5.0"
+version = "0.5.1"
 description = "A taste-driven autoresearcher: the idle network of an AI mind."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -50,6 +50,11 @@ dmn-eval = "eval:app"
 
 [project.urls]
 Homepage = "https://github.com/cromwellian/default-mode-network"
+
+[tool.uv]
+# modal → cbor2 6.x has no Intel-mac wheels and needs a Rust toolchain to build;
+# the 5.x line ships wheels everywhere and modal accepts it.
+constraint-dependencies = ["cbor2<6"]
 
 [build-system]
 requires = ["hatchling"]

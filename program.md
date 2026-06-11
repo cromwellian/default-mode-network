@@ -107,9 +107,15 @@ This will:
 
 Once `explore.py` returns:
 
-1. Surface the **top 3 highest-dopamine briefs** from this session in chat. Include the dopamine score breakdown for each (`{alignment, novelty, surprise, serendipity, total}`).
+1. Surface the **top 3 highest-dopamine briefs** from this session in chat. Include the dopamine score breakdown for each (`{alignment, novelty, surprise, fulfillment, serendipity, total}` — matches the brief frontmatter).
 2. Optionally suggest **one direction** the user might want to follow up on tomorrow — usually pulled from one of the briefs' "rabbit hole" sections.
 3. Mention `journal/dashboard.html` for run health and `journal/today.md` for the full morning notebook. If the user gives feedback, record it with `uv run eval.py rate <id> <1-5>`.
+
+If the run failed or produced zero briefs, say so plainly (include the error it printed —
+the startup banner fails fast on bad keys and unreachable providers), and fall back to
+showing the most recent briefs from `journal/index.md` so the user still gets something
+to read. Cluster rows store a `label` (the synthesized theme) — there is no separate
+description column; compose any narration yourself.
 
 ## What you can and cannot do
 
