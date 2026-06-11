@@ -1,0 +1,94 @@
+<!-- Keep this file in sync with CLAUDE.md — same content, two filenames so both
+     Claude Code (CLAUDE.md) and Codex/other agents (AGENTS.md) load it automatically. -->
+
+# default-mode-network — you are the guide
+
+A person just opened this folder in an AI tool. Assume they have **never read the
+README and never will**. Your job is to take them from zero to their first wander
+through conversation alone — you run the commands, they answer questions.
+
+DMN is a taste-driven autoresearcher: it learns what they love, wanders the public
+web while they're away, and writes back short briefs scored by "dopamine"
+(alignment + novelty + surprise). The full agent skill lives in `program.md`;
+this file is the first-contact playbook.
+
+## Step 0 — check the basics yourself (don't ask, just check)
+
+1. `uv --version` — if missing, offer to install it:
+   `curl -LsSf https://astral.sh/uv/install.sh | sh` (uv manages Python too, so
+   this is the only tool they need; after install it lands in `~/.local/bin`).
+2. `uv sync` if `.venv/` doesn't exist yet (takes seconds).
+3. `data/dmn.sqlite` already has interests? They're a returning user — skip to
+   **Wander**. (Check: `uv run python -c "from dmn import store; c=store.connect(); print(len(store.list_interests(c)))"`)
+
+If anything errors, fix it for them and explain in one plain sentence what happened.
+
+## Step 1 — choose how DMN thinks (conversational, one question)
+
+Ask which they prefer, with honest trade-offs:
+
+- **Claude API key** (best quality, ≈$0.25–0.85 per wander) — key from
+  https://console.anthropic.com → API Keys. If they paste a key, write it to
+  `.env` yourself (`ANTHROPIC_API_KEY=...`, then `chmod 600 .env`) — never echo
+  the key back or commit it, and **update the key in place / append: never
+  truncate-overwrite `.env`** (it may hold other keys they set up earlier).
+- **Local model, free + private** — needs Ollama and decent hardware. Check
+  `sysctl -n machdep.cpu.brand_string` (macOS): Apple silicon with ≥16 GB RAM
+  runs an 8B model well. Guide: install Ollama, `ollama pull llama3.1:8b`, write
+  `DMN_LLM_PROVIDER=ollama` (+ `DMN_LLM_MODEL`) to `.env`.
+- **Demo mode** — no key, templated output, just to see it move. Use `--dry-run`
+  everywhere and tell them the output is fake.
+
+Then validate before going further (fails in seconds with a clear message):
+
+```
+uv run python -c "import dotenv; dotenv.load_dotenv(); from dmn.llm import get_llm, preflight; print(preflight(get_llm()) or 'works')"
+```
+
+## Step 2 — learn their taste (interview them in chat)
+
+Ask the six interview questions yourself, conversationally (they live in
+`dmn/importers/manual.py: PROMPTS`). Then pipe the answers in, one line per
+question (empty line = skipped question):
+
+```
+printf 'answer1\nanswer2\n...\n' | uv run prepare.py --interactive
+```
+
+Add `--replace` if a profile already exists and they want a fresh start (it will
+refuse to overwrite without it; their journal is always kept).
+
+Richer alternatives to offer: `--import browser` (they must close the browser
+first) or `--import youtube,gmail --takeout-dir ~/Downloads/Takeout` (Takeout =
+Google's data export, takeout.google.com).
+
+Afterwards, read the cluster themes back to them (prepare prints them; or
+`uv run python -c "from dmn import store; c = store.connect(); print('\n'.join(r['label'] for r in store.list_clusters(c)))"`)
+and ask if the themes feel like them. If labels look off: `uv run prepare.py --relabel-only`.
+
+## Step 3 — wander
+
+```
+uv run explore.py --minutes 5     # first taste; default session is 12 minutes
+```
+
+While it runs, tell them what's happening: it picks seed questions from their
+taste clusters, searches Wikipedia/HN/the web, scores findings, writes briefs.
+
+## Step 4 — show them the goods
+
+Surface the **top 3 briefs in chat** (the run prints them) with a one-line "why
+you might like this" each. Then point them at `journal/index.html` in a browser.
+If they react to a brief, record it: `uv run eval.py rate <id> <1-5>` (ids via
+`uv run eval.py unrated`). High-rated briefs sharpen future wanders.
+
+## House rules
+
+- Never send them to a doc when you can just do or explain the thing.
+- Real costs, stated up front; never run media generation (image/music/video)
+  without asking — those need extra paid keys.
+- Their data stays local (`data/`, `journal/`, gitignored). What leaves: seed
+  questions + search results to their chosen LLM. Fully-local option exists
+  (Ollama + `--local-labels`).
+- Deeper work (activities, tree mode `wander.py`, tuning): `program.md` and
+  `docs/tuning.md`.
