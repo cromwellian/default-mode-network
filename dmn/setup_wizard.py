@@ -223,10 +223,12 @@ def _profile_exists() -> bool:
 
 
 def _build_profile(demo_only: bool) -> int:
+    rebuild = False
     if _profile_exists():
         console.print("\nYou already have a taste profile in [bold]data/dmn.sqlite[/].")
         if not _confirm("Rebuild it from scratch? (No keeps the existing one)", default=False):
             return 0
+        rebuild = True
     console.print("\nHow should DMN learn your taste?")
     console.print("  1) Quick interview — 6 questions, ~2 minutes")
     console.print("  2) Interview + import your browser history (close your browser first)")
@@ -239,6 +241,8 @@ def _build_profile(demo_only: bool) -> int:
         cmd += ["--dry-run"]
     else:
         cmd += ["--interactive"]
+    if rebuild:
+        cmd.append("--replace")  # already confirmed above; avoid a double prompt
     console.print(f"[dim]Running: {' '.join(cmd[1:])}[/]\n")
     return subprocess.run(cmd).returncode
 
