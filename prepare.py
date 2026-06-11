@@ -367,24 +367,32 @@ def main(
     conn = store.connect()
     existing = store.list_interests(conn)
     old_interest_ids: list[int] = []
-    if existing:
+    if existing and replace:
         console.print(
-            f"[yellow]This replaces your existing profile ({len(existing)} interests) "
-            f"with the {len(interests)} item(s) just collected. Your journal is kept.[/]"
+            f"[yellow]--replace: starting fresh — dropping your {len(existing)} existing "
+            f"interest(s) for the {len(interests)} just collected. Your journal is kept.[/]"
         )
-        if not replace:
-            if not sys.stdin.isatty():
-                console.print(
-                    "[red]Refusing to replace an existing profile non-interactively. "
-                    "Pass --replace to rebuild.[/]"
-                )
-                conn.close()
-                raise typer.Exit(1)
-            if not typer.confirm("Replace it?", default=False):
-                console.print("Kept the existing profile — nothing was changed.")
-                conn.close()
-                raise typer.Exit(0)
         old_interest_ids = [int(r["id"]) for r in existing]
+        existing = []
+    elif existing:
+        before = len(interests)
+        existing_keys = {(r.get("text") or "").strip().lower() for r in existing}
+        interests = [
+            it
+            for it in interests
+            if (it.get("text") or "").strip().lower() not in existing_keys
+        ]
+        dropped = before - len(interests)
+        console.print(
+            f"Appending [bold]{len(interests)}[/] new interest(s) to your existing "
+            f"{len(existing)}"
+            + (f" ({dropped} already known, skipped)" if dropped else "")
+            + " and re-clustering everything. Use --replace for a fresh start."
+        )
+        if not interests:
+            console.print("[yellow]Nothing new to add — profile unchanged.[/]")
+            conn.close()
+            raise typer.Exit(0)
 
     texts = [i["text"] for i in interests]
     emb.embed(texts[:1])  # first call prints any fallback notice cleanly, pre-spinner
@@ -402,6 +410,21 @@ def main(
             last_seen=item.get("last_seen"),
         )
         interest_ids.append(iid)
+
+    if existing:
+        # Re-cluster over the union: stored embeddings + the new batch. Legacy
+        # rows without embeddings get re-embedded in memory for clustering.
+        no_vec = [r for r in existing if r.get("embedding") is None]
+        if no_vec:
+            for r, v in zip(no_vec, emb.embed([r["text"] for r in no_vec])):
+                r["embedding"] = np.asarray(v, dtype=np.float32)
+        old_vecs = np.stack(
+            [np.asarray(r["embedding"], dtype=np.float32) for r in existing]
+        )
+        vectors = np.vstack([old_vecs, vectors]) if len(interests) else old_vecs
+        interests = existing + interests
+        interest_ids = [int(r["id"]) for r in existing] + interest_ids
+        texts = [i["text"] for i in interests]
 
     with console.status(f"Clustering taste profile ({cluster_method}, recency-weighted)…"):
         result, weights, synth_labels, is_noise_flags = run_clustering_pipeline(

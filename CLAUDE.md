@@ -70,10 +70,10 @@ uv run python -c "import dotenv; dotenv.load_dotenv(); from dmn.llm import get_l
 
 ## Step 2 — learn their taste (interview them in chat)
 
-**Walk the sources step by step, one yes/skip question each** — everything goes
-into ONE combined run, because prepare runs **replace** the profile (append is
-on the roadmap; two runs would wipe the first). For each yes, get the file
-location before moving on. The walk:
+**Walk the sources step by step, one yes/skip question each.** Sources can be
+added now or any time later — prepare **appends and re-clusters by default**;
+`--replace` starts fresh. For each yes, get the file location before moving on.
+The walk:
 
 1. **Interview** — 6 questions about what they love right now. (Most people: yes.)
 2. **Browser history** — explain before asking: DMN reads the browser's local
@@ -103,8 +103,9 @@ printf 'answer1\nanswer2\n...\n' | uv run prepare.py --interactive \
   --import browser,youtube --takeout-dir ~/Downloads/Takeout
 ```
 
-Add `--replace` if a profile already exists and they want a fresh start (it will
-refuse to overwrite without it; their journal is always kept).
+Re-running prepare with new sources **adds** them to the existing profile and
+re-clusters everything (duplicates are skipped). Add `--replace` only when they
+want a fresh start; their journal is always kept either way.
 
 Afterwards, read the cluster themes back to them (prepare prints them; or
 `uv run python -c "from dmn import store; c = store.connect(); print('\n'.join(r['label'] for r in store.list_clusters(c)))"`)
@@ -112,8 +113,9 @@ and ask if the themes feel like them. If labels look off: `uv run prepare.py --r
 
 ## Step 3 — wander (ask three things first — never just launch it)
 
-1. **"All your sources in, or anything else to import first?"** — prepare runs
-   replace the profile, so imports must land before wandering matters.
+1. **"All your sources in, or anything else to import first?"** — more can be
+   added later (prepare appends), but the first wander is only as good as the
+   profile it reads.
 2. **"What should wanders produce?"** — default is research briefs only; they
    can mix (via `--activities` or weighted `--activity-mix`):
    `research` (cited mini-briefs) · `code_sketch` (small Python toys; add
