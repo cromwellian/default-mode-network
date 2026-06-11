@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 from typing import Sequence
 
 import numpy as np
@@ -63,8 +64,6 @@ def embed(texts: Sequence[str]) -> np.ndarray:
         global _warned_fallback
         if not _warned_fallback:
             _warned_fallback = True
-            import sys
-
             print(
                 "embeddings: sentence-transformers not installed — using fast hash fallback "
                 "(fine for a test drive; `uv sync --extra embeddings` gives better clusters)",
