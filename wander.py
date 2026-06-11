@@ -40,8 +40,9 @@ from dmn import generators as gens
 from dmn import html_journal, journal, portability, seeds, store, taste, tree
 from dmn import report as report_mod
 from dmn.activities import ActivityContext, ActivityResult
+from dmn import llm as llm_mod
 from dmn.llm import get_llm
-from dmn.loop import available_tools_for
+from dmn.loop import available_tools_for, install_graceful_sigint
 from dmn.activities.riff_prompts import load_parent_brief_md, make_legacy_media_prompt
 from dmn.sandbox import normalize_mode
 
@@ -199,7 +200,9 @@ def main(
     started_at = time.time()
 
     llm = get_llm(dry_run=dry_run)
-    console.print(f"LLM provider: [bold]{llm.name}[/]")
+    llm_mod.announce_and_preflight(
+        llm, console, dry_run=dry_run, iterations=iterations, minutes=minutes
+    )
     enabled_modalities = {m.strip() for m in modalities.split(",") if m.strip()}
     if generate:
         console.print(
@@ -276,6 +279,7 @@ def main(
     frontier = tree.Frontier()
     deadline = time.time() + minutes * 60 if minutes else None
     n_done = 0
+    stop = install_graceful_sigint(console)
     session_node_ids: list[int] = []
     best_score = 0.0
     stale_expansions = 0
@@ -313,6 +317,8 @@ def main(
     # --- spawn initial roots ---------------------------------------------------
     if not resume:
         for i in range(root_count):
+            if stop["stop"]:
+                break
             if iterations is not None and n_done >= iterations:
                 break
             if deadline is not None and time.time() >= deadline:
@@ -364,6 +370,8 @@ def main(
     available = available_tools_for(dry_run)
     multi_modal = len(eligible_activity_names) > 1
     while True:
+        if stop["stop"]:
+            break
         if deadline is not None and time.time() >= deadline:
             break
         if iterations is not None and n_done >= iterations:
@@ -381,6 +389,8 @@ def main(
             console.print("[yellow]patience triggered; restarting from a fresh root[/]")
             patience_restarts += 1
             stale_expansions = 0
+            if stop["stop"]:
+                break
             root_seed = _pick_root_seed(clusters, llm, rng, focus_cluster=_next_root_focus())
             child_id, score, _ = _expand_brief(
                 conn=conn,
@@ -415,7 +425,7 @@ def main(
             continue
 
         if frontier.size() == 0 or rng.random() < restart_prob:
-            if iterations is not None and n_done >= iterations:
+            if stop["stop"] or (iterations is not None and n_done >= iterations):
                 break
             console.print("[dim]restarting from fresh cluster-seeded root[/]")
             root_seed = _pick_root_seed(clusters, llm, rng, focus_cluster=_next_root_focus())
@@ -477,6 +487,8 @@ def main(
         children: list[tuple[int, float, np.ndarray]] = []
         expansion_best_before = best_score
         for op in ops:
+            if stop["stop"]:
+                break
             if iterations is not None and n_done >= iterations:
                 break
             if deadline is not None and time.time() >= deadline:

@@ -32,6 +32,17 @@ from dmn.llm import get_llm
 
 console = Console()
 
+
+def _warn_if_stub_labels(llm, dry_run: bool, local_labels: bool) -> None:
+    """Tell the user when cluster labels will be word-frequency fallbacks, not thematic."""
+    if llm.name != "stub" or dry_run or local_labels:
+        return
+    console.print(
+        "[yellow]No LLM available — cluster labels will be basic word-frequency themes. "
+        "Put ANTHROPIC_API_KEY in .env and run `uv run prepare.py --relabel-only` "
+        "to upgrade them later.[/]"
+    )
+
 BANNER = r"""
    ___  __  __  _  _
   |   \|  \/  || \| |   default-mode-network
@@ -362,6 +373,7 @@ def main(
     )
 
     llm = get_llm(dry_run=True) if local_labels else get_llm(dry_run=dry_run)
+    _warn_if_stub_labels(llm, dry_run=dry_run, local_labels=local_labels)
     console.print(
         f"Synthesizing cluster labels via [bold]{llm.name}[/] LLM…"
     )
@@ -441,6 +453,7 @@ def _relabel_only(dry_run: bool, local_labels: bool, verbose: bool) -> None:
     labels = _assign_labels(vectors, centroids)
 
     llm = get_llm(dry_run=True) if local_labels else get_llm(dry_run=dry_run)
+    _warn_if_stub_labels(llm, dry_run=dry_run, local_labels=local_labels)
     console.print(
         f"Re-synthesizing labels for [bold]{len(centroids)}[/] cluster(s) "
         f"via [bold]{llm.name}[/] LLM…"

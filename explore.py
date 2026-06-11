@@ -36,7 +36,9 @@ from dmn import embeddings as emb
 from dmn import generators as gens
 from dmn import html_journal, journal, portability, seeds, store, taste
 from dmn.activities import ActivityContext, ActivityResult
+from dmn import llm as llm_mod
 from dmn.llm import get_llm
+from dmn.loop import install_graceful_sigint
 from dmn.activities.riff_prompts import make_legacy_media_prompt
 from dmn.sandbox import normalize_mode
 
@@ -122,7 +124,9 @@ def main(
     rng = random.Random()
 
     llm = get_llm(dry_run=dry_run)
-    console.print(f"LLM provider: [bold]{llm.name}[/]")
+    llm_mod.announce_and_preflight(
+        llm, console, dry_run=dry_run, iterations=iterations, minutes=minutes
+    )
 
     enabled_modalities = {m.strip() for m in modalities.split(",") if m.strip()}
     if generate:
@@ -184,8 +188,11 @@ def main(
 
     deadline = time.time() + minutes * 60 if minutes else None
     n_done = 0
+    stop = install_graceful_sigint(console)
 
     while True:
+        if stop["stop"]:
+            break
         if deadline is not None and time.time() >= deadline:
             break
         if iterations is not None and n_done >= iterations:
