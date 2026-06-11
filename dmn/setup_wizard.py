@@ -293,7 +293,9 @@ def source_walk(ask=_ask, confirm=_confirm, say=None) -> list[str]:
         if path:
             imports.append("youtube")
             args += ["--takeout-dir", path]
-            if list(Path(path).rglob("BrowserHistory.json")):
+            from dmn.importers import browser as _browser_imp
+
+            if _browser_imp.find_takeout_chrome(path):
                 if confirm(
                     "This Takeout also has deep Chrome history (months–years vs the "
                     "local ~90 days) — include it?"

@@ -241,6 +241,24 @@ def _normalize_row(row: dict) -> dict:
     return out
 
 
+def find_takeout_chrome(takeout_dir) -> Optional[Path]:
+    """Locate Chrome/BrowserHistory.json under a Takeout folder, cheaply.
+
+    Checks the canonical locations before falling back to a bounded recursive scan,
+    so huge Takeout trees don't stall the wizard.
+    """
+    base = Path(takeout_dir).expanduser()
+    if not base.exists():
+        return None
+    for cand in (base / "Chrome" / "BrowserHistory.json",
+                 base / "Takeout" / "Chrome" / "BrowserHistory.json"):
+        if cand.exists():
+            return cand
+    for cand in sorted(base.glob("*/Chrome/BrowserHistory.json")):
+        return cand
+    return None
+
+
 def import_takeout_history(
     takeout_dir,
     limit: Optional[int] = None,
@@ -256,11 +274,23 @@ def import_takeout_history(
     """
     import json as _json
 
-    base = Path(takeout_dir).expanduser()
-    candidates = sorted(base.rglob("BrowserHistory.json")) if base.exists() else []
-    if not candidates:
+    path = find_takeout_chrome(takeout_dir)
+    if path is None:
         return []
-    path = candidates[0]
+    size_mb = path.stat().st_size / 2**20
+    if size_mb > 1024:
+        print(
+            f"[dmn] takeout-chrome: {path} is {size_mb:.0f} MB — too large to load "
+            "in one piece; skipping. (Streaming support is a known gap.)",
+            file=sys.stderr,
+        )
+        return []
+    if size_mb > 100:
+        print(
+            f"[dmn] takeout-chrome: {path} is {size_mb:.0f} MB — loading may take "
+            "a minute and some memory; everything stays on this machine.",
+            file=sys.stderr,
+        )
     print(
         f"[dmn] takeout-chrome: reading {path} (processed on this machine)",
         file=sys.stderr,
@@ -287,6 +317,10 @@ def import_takeout_history(
         if ts and ts > slot["last_seen"]:
             slot["last_seen"] = ts
     rows = list(by_url.values())
+    print(
+        f"[dmn] takeout-chrome: {len(entries):,} visits over {len(by_url):,} pages",
+        file=sys.stderr,
+    )
     if limit:
         rows.sort(key=lambda r: r["visit_count"], reverse=True)
         rows = rows[:limit]
@@ -300,7 +334,7 @@ def import_takeout_history(
         stats_drops: dict = {}
     else:
         kept, stats_drops, _gate = _clean_with_stats(normalized, keep_services=keep_services)
-    _report_browser("takeout-chrome", len(entries), len(kept), stats_drops)
+    _report_browser("takeout-chrome", len(rows), len(kept), stats_drops)
     return _to_text_dicts(kept)
 
 

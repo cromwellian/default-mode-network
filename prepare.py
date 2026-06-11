@@ -202,7 +202,7 @@ def profile_quality_report(interests: list[dict]) -> list[str]:
         share = top_cnt / max(n, 1)
         if share > 0.7:
             lines.append(
-                f"⚠ {share:.0%} of your profile comes from one source ({top_src}). "
+                f"⚠ {share:.0%} of your profile comes from one source family ({top_src}). "
                 "Taste works best from a mix of what you read, watch, and listen to — "
                 "consider adding another source."
             )
