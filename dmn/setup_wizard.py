@@ -419,9 +419,15 @@ def _run() -> None:
         console.print(f"[red]prepare.py exited with {rc} — fix the issue above and re-run.[/]")
         raise SystemExit(rc)
 
-    console.print("\n[bold green]Setup complete.[/] Take your first wander:")
+    console.print("\n[bold green]Setup complete.[/] Get familiar with a small taster first:")
     if choice == "3":
-        console.print("  [bold]uv run explore.py --dry-run --iterations 2[/]")
+        console.print("  [bold]uv run explore.py --dry-run --iterations 2[/]   (demo output)")
     else:
-        console.print("  [bold]uv run explore.py --minutes 5[/]")
+        console.print("  [bold]uv run explore.py --iterations 3[/]   (~2–3 min, pennies)")
+        console.print(
+            "Then a full session — default 12 minutes; pick what it produces:\n"
+            "  [bold]uv run explore.py --minutes 12 --activities research,code_sketch[/]\n"
+            "  (menu: research, code_sketch, web_app_sketch, app_idea, algorithm_explore,\n"
+            "   mood_journal; image/music/video riffs need extra keys — docs/tuning.md)"
+        )
     console.print("Then open [bold]journal/index.html[/] in a browser to read what it found.")

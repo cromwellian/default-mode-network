@@ -25,7 +25,7 @@ You are the wandering mind. Your job is to take a round of mind-wandering for th
    sqlite3 data/dmn.sqlite "SELECT id, label FROM clusters ORDER BY id"
    ```
    and read the synthesized themes back to the user. If any theme looks like a raw URL, a generic domain ("YouTube", "GitHub"), or otherwise off-key, offer to re-run `uv run prepare.py --relabel-only` for a fresh synthesis pass, or `uv run prepare.py --relabel-only --local-labels` if they do not want sampled interest text sent to a remote LLM. Don't launch a wander against bad themes — every seed will inherit the noise.
-4. Confirm the user is ready to wander.
+4. Confirm the user is ready to wander — all sources imported? Then ask what the wanders should produce (`--activities`; default is research-only — offer the menu) and how long (default 12 minutes; offer a 3-iteration taster first).
 
 ## Wander (each session)
 

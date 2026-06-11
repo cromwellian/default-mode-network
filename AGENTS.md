@@ -110,11 +110,26 @@ Afterwards, read the cluster themes back to them (prepare prints them; or
 `uv run python -c "from dmn import store; c = store.connect(); print('\n'.join(r['label'] for r in store.list_clusters(c)))"`)
 and ask if the themes feel like them. If labels look off: `uv run prepare.py --relabel-only`.
 
-## Step 3 — wander
+## Step 3 — wander (ask three things first — never just launch it)
+
+1. **"All your sources in, or anything else to import first?"** — prepare runs
+   replace the profile, so imports must land before wandering matters.
+2. **"What should wanders produce?"** — default is research briefs only; they
+   can mix (via `--activities` or weighted `--activity-mix`):
+   `research` (cited mini-briefs) · `code_sketch` (small Python toys; add
+   `--execute` to sandbox-run them) · `web_app_sketch` (self-contained HTML/JS
+   toys) · `app_idea` (one-page PRDs) · `algorithm_explore` · `mood_journal`
+   (reflective entry) · `image_riff`/`music_riff`/`video_riff` (need extra paid
+   keys — ask before enabling).
+3. **"How long?"** — the default session is **12 wall-clock minutes**
+   (≈$0.25–0.85 hosted). Offer a familiarization **taster first**:
+   `--iterations 3` ≈ 2–3 minutes for pennies, read the results together, then
+   commit to a full session with their chosen mix.
 
 ```
-uv run explore.py --minutes 5                    # first taste; default is 12 min
-uv run explore.py --dry-run --iterations 2       # demo-mode equivalent
+uv run explore.py --iterations 3                                  # taster
+uv run explore.py --minutes 12 --activities research,code_sketch  # full session, their mix
+uv run explore.py --dry-run --iterations 2                        # demo-mode equivalent
 ```
 
 While it runs, tell them what's happening: it picks seed questions from their
