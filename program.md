@@ -6,7 +6,19 @@ You are the wandering mind. Your job is to take a round of mind-wandering for th
 
 1. Read `README.md` and `program.md` for context (you're reading the latter now).
 2. Check whether `data/dmn.sqlite` exists.
-   - If **not**: run `uv run prepare.py --interactive` to take the user through the cold-start interview. Or, if the user prefers to skip the interview, suggest `uv run prepare.py --dry-run` for a synthetic profile, or `uv run prepare.py --import browser,youtube --takeout-dir ~/Downloads/Takeout` for importer-only.
+   - If **not**, build a profile. Your shell is probably non-interactive, so don't run
+     `prepare.py --interactive` bare — the interview would read EOF and collect nothing.
+     Pick one:
+     - **Interview via chat (best):** ask the user the six interview questions yourself
+       (they're in `dmn/importers/manual.py: PROMPTS`), then pipe their answers in, one
+       line per question: `printf 'answer1\nanswer2\n...\n' | uv run prepare.py --interactive`
+     - **Guided wizard:** have the user run `uv run dmn-setup` in their own terminal
+       (it also sets up the LLM provider and writes `.env`).
+     - **Importer-only:** `uv run prepare.py --import browser` (user must close the
+       browser first) or `--import youtube,gmail --takeout-dir ~/Downloads/Takeout`.
+     - **Synthetic demo:** `uv run prepare.py --dry-run`.
+     If a profile already exists and the user wants a rebuild, add `--replace`
+     (non-interactive runs refuse to overwrite without it).
    - If **yes**: skip ahead.
 3. **Show the user their cluster themes** before launching a wander. Run:
    ```
