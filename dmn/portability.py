@@ -14,21 +14,20 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
-import os
 import sqlite3
 from typing import Any
 
 import numpy as np
 
-from dmn import __version__, store
+from dmn import __version__, embeddings, store
 
 SCHEMA_VERSION = 6
 _SUPPORTED_SCHEMAS = {1, 2, 3, 4, 5, 6}
 
 
 def _embedding_model_name() -> str:
-    """Return the canonical name of the embedding model currently configured."""
-    backend = os.environ.get("DMN_EMBEDDINGS", "st").lower()
+    """Return the canonical name of the embedding model actually in use."""
+    backend = embeddings.effective_backend()
     if backend == "openai":
         return "openai/text-embedding-3-small"
     if backend == "hash":

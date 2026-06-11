@@ -109,6 +109,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # 2. Install dependencies
 uv sync
 
+# (optional) local ML embeddings for sharper taste clusters — skip if it fails
+# on your platform; DMN falls back to fast hash embeddings automatically
+uv sync --extra embeddings
+
 # 3. Bootstrap a taste profile (with a synthetic seed, no input needed)
 uv run prepare.py --dry-run
 

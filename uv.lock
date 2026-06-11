@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -819,7 +819,6 @@ dependencies = [
     { name = "rich" },
     { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scikit-learn", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "sentence-transformers" },
     { name = "typer" },
     { name = "wikipedia-api" },
 ]
@@ -835,6 +834,9 @@ code = [
 ]
 dev = [
     { name = "pytest" },
+]
+embeddings = [
+    { name = "sentence-transformers" },
 ]
 generators = [
     { name = "google-genai" },
@@ -901,13 +903,13 @@ requires-dist = [
     { name = "requests", marker = "extra == 'music'", specifier = ">=2.31.0" },
     { name = "rich", specifier = ">=13.7.0" },
     { name = "scikit-learn", specifier = ">=1.4.0" },
-    { name = "sentence-transformers", specifier = ">=3.0.0" },
+    { name = "sentence-transformers", marker = "extra == 'embeddings'", specifier = ">=3.0.0" },
     { name = "torch", marker = "extra == 'activities'", specifier = ">=2.2.0" },
     { name = "torch", marker = "extra == 'ml'", specifier = ">=2.2.0" },
     { name = "typer", specifier = ">=0.12.0" },
     { name = "wikipedia-api", specifier = ">=0.7.0" },
 ]
-provides-extras = ["musicbrainz", "image", "music", "video", "generators", "code", "ml", "activities", "dev", "modal"]
+provides-extras = ["embeddings", "musicbrainz", "image", "music", "video", "generators", "code", "ml", "activities", "dev", "modal"]
 
 [[package]]
 name = "detect-installer"

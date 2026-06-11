@@ -15,7 +15,6 @@ dependencies = [
     "wikipedia-api>=0.7.0",
     "duckduckgo-search>=6.0.0",
     "requests>=2.31.0",
-    "sentence-transformers>=3.0.0",
     "scikit-learn>=1.4.0",
     "hdbscan>=0.8.33",
     "numpy>=1.26.0",
@@ -25,6 +24,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Local ML embeddings (pulls in torch — needs a platform with current torch wheels).
+# Without it DMN uses fast hash-fallback embeddings; clusters are rougher but everything runs.
+embeddings = ["sentence-transformers>=3.0.0"]
 musicbrainz = ["musicbrainzngs>=0.7.1"]
 image = ["google-genai>=0.3.0", "replicate>=0.30.0", "Pillow>=10.0.0", "huggingface-hub>=0.26.0"]
 music = ["requests>=2.31.0", "google-genai>=0.3.0"]
