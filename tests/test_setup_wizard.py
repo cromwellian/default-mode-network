@@ -109,3 +109,49 @@ def test_machine_arch_passthrough_off_darwin(monkeypatch):
     monkeypatch.setattr(sw.platform, "machine", lambda: "x86_64")
     monkeypatch.setattr(sw.sys, "platform", "linux")
     assert sw._machine_arch() == "x86_64"
+
+
+def _scripted_walk(confirms, asks):
+    from dmn import setup_wizard as sw
+
+    c = iter(confirms)
+    a = iter(asks)
+    said = []
+    return sw.source_walk(
+        ask=lambda *p, **k: next(a),
+        confirm=lambda *p, **k: next(c),
+        say=said.append,
+    )
+
+
+def test_source_walk_all_skipped_yields_no_args():
+    assert _scripted_walk([False, False, False, False, False], [""]) == []
+
+
+def test_source_walk_interview_plus_browser():
+    args = _scripted_walk([True, True, False, False, False], [""])
+    assert args == ["--interactive", "--import", "browser"]
+
+
+def test_source_walk_full_house(tmp_path, monkeypatch):
+    from dmn import setup_wizard as sw
+
+    takeout = tmp_path / "Takeout"
+    takeout.mkdir()
+    tw = tmp_path / "twitter-archive"
+    tw.mkdir()
+    csv = tmp_path / "liked.csv"
+    csv.write_text("title\nsong\n")
+    paths = iter([str(takeout), str(tw), str(csv)])
+    monkeypatch.setattr(sw, "_ask_path", lambda prompt: next(paths))
+    args = sw.source_walk(
+        ask=lambda *p, **k: "",
+        confirm=lambda *p, **k: True,
+        say=lambda *p, **k: None,
+    )
+    assert "--interactive" in args
+    assert ["--twitter-dir", str(tw)] == args[args.index("--twitter-dir"):args.index("--twitter-dir") + 2]
+    assert ["--takeout-dir", str(takeout)] == args[args.index("--takeout-dir"):args.index("--takeout-dir") + 2]
+    assert ["--readwise-csv", str(csv)] == args[args.index("--readwise-csv"):args.index("--readwise-csv") + 2]
+    imports = args[args.index("--import") + 1]
+    assert imports == "browser,youtube,gmail,drive,twitter,readwise"

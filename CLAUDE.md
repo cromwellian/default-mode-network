@@ -70,41 +70,66 @@ uv run python -c "import dotenv; dotenv.load_dotenv(); from dmn.llm import get_l
 
 ## Step 2 — learn their taste (interview them in chat)
 
-**Before asking anything, settle the sources** — ask once: "Interview only, or
-should I also pull in your browser history and/or a Google Takeout export?
-Everything goes into one combined run." This matters because prepare runs
-**replace** the profile (append is on the roadmap): interview-now-import-later
-as two runs would wipe the interview. Build ONE command with everything they
-want (e.g. `--interactive --import browser,youtube --takeout-dir ~/Downloads/Takeout`).
-Browser import needs the browser closed; Takeout = takeout.google.com export
-— tell them to **Deselect all, then tick only YouTube / Mail / Drive**: a
-small export arrives in minutes, select-all takes Google days.
+**Walk the sources step by step, one yes/skip question each** — everything goes
+into ONE combined run, because prepare runs **replace** the profile (append is
+on the roadmap; two runs would wipe the first). For each yes, get the file
+location before moving on. The walk:
 
-Then ask the six interview questions yourself, conversationally (they live in
-`dmn/importers/manual.py: PROMPTS`). Then pipe the answers in, one line per
-question (empty line = skipped question):
+1. **Interview** — 6 questions about what they love right now. (Most people: yes.)
+2. **Browser history** — explain before asking: DMN reads the browser's local
+   database (Chrome/Arc/Brave/Edge/Firefox/Safari) as a read-only copy, processed
+   on this machine; it holds roughly the **last 90 days**; the browser must be
+   closed; noise (homepages, search results, work-tool pages) should be filtered.
+3. **YouTube watch history** — the richest consumption signal. Needs a Google
+   Takeout folder (takeout.google.com → **Deselect all → tick YouTube** → minutes,
+   not days; select-all takes days). Ask for the unzipped folder's path. Offer
+   Gmail/Drive from the same folder, with the caveat that sent-mail is a weak,
+   logistics-heavy signal.
+4. **Twitter/X likes** — needs an unzipped archive export; ask for the path.
+5. **Spotify / Goodreads / Readwise / saved-links apps** — any CSV with a
+   Title/title/Highlight/text column imports via `--readwise-csv` (Spotify:
+   exportify.net exports Liked Songs to CSV in minutes; JSON exports can be
+   converted to such a CSV). Ask for the path.
+6. **Close with:** "Any other data source you wish to include in the taste
+   profile?" If it exports to CSV with a title/text column, convert and use
+   step 5; otherwise note it as unsupported.
+
+Then ask the six interview questions conversationally (they live in
+`dmn/importers/manual.py: PROMPTS`) and pipe everything into ONE command, one
+line per question (empty line = skipped question):
 
 ```
-printf 'answer1\nanswer2\n...\n' | uv run prepare.py --interactive
+printf 'answer1\nanswer2\n...\n' | uv run prepare.py --interactive \
+  --import browser,youtube --takeout-dir ~/Downloads/Takeout
 ```
 
 Add `--replace` if a profile already exists and they want a fresh start (it will
 refuse to overwrite without it; their journal is always kept).
 
-Richer alternatives to offer: `--import browser` (they must close the browser
-first) or `--import youtube,gmail --takeout-dir ~/Downloads/Takeout` (Takeout =
-Google's data export, takeout.google.com — deselect all, tick only
-YouTube/Mail/Drive; small exports take minutes, select-all takes days).
-
 Afterwards, read the cluster themes back to them (prepare prints them; or
 `uv run python -c "from dmn import store; c = store.connect(); print('\n'.join(r['label'] for r in store.list_clusters(c)))"`)
 and ask if the themes feel like them. If labels look off: `uv run prepare.py --relabel-only`.
 
-## Step 3 — wander
+## Step 3 — wander (ask three things first — never just launch it)
+
+1. **"All your sources in, or anything else to import first?"** — prepare runs
+   replace the profile, so imports must land before wandering matters.
+2. **"What should wanders produce?"** — default is research briefs only; they
+   can mix (via `--activities` or weighted `--activity-mix`):
+   `research` (cited mini-briefs) · `code_sketch` (small Python toys; add
+   `--execute` to sandbox-run them) · `web_app_sketch` (self-contained HTML/JS
+   toys) · `app_idea` (one-page PRDs) · `algorithm_explore` · `mood_journal`
+   (reflective entry) · `image_riff`/`music_riff`/`video_riff` (need extra paid
+   keys — ask before enabling).
+3. **"How long?"** — the default session is **12 wall-clock minutes**
+   (≈$0.25–0.85 hosted). Offer a familiarization **taster first**:
+   `--iterations 3` ≈ 2–3 minutes for pennies, read the results together, then
+   commit to a full session with their chosen mix.
 
 ```
-uv run explore.py --minutes 5                    # first taste; default is 12 min
-uv run explore.py --dry-run --iterations 2       # demo-mode equivalent
+uv run explore.py --iterations 3                                  # taster
+uv run explore.py --minutes 12 --activities research,code_sketch  # full session, their mix
+uv run explore.py --dry-run --iterations 2                        # demo-mode equivalent
 ```
 
 While it runs, tell them what's happening: it picks seed questions from their
