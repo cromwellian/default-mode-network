@@ -44,7 +44,7 @@ dmn-setup = "dmn.setup_wizard:run"
 dmn-prepare = "dmn.cli:prepare"
 dmn-explore = "dmn.cli:explore"
 dmn-wander = "dmn.cli:wander"
-dmn-profile = "profile:app"
+dmn-profile = "profiles:app"
 dmn-journal = "journal:app"
 dmn-eval = "eval:app"
 
@@ -70,7 +70,7 @@ include = [
     "explore.py",
     "wander.py",
     "journal.py",
-    "profile.py",
+    "profiles.py",
     "eval.py",
     "program.md",
     "SKILL.md",

@@ -57,7 +57,7 @@ The wizard offers all of these; you can re-run any of them later — prepare **a
 
 ```bash
 uv run prepare.py --interactive                  # 6-question interview, ~2 minutes
-uv run prepare.py --import browser --browsers chrome,arc   # close the browser first
+uv run prepare.py --import browser --browsers chrome,arc
 uv run prepare.py --import youtube,gmail,drive --takeout-dir ~/Downloads/Takeout
 ```
 
@@ -143,7 +143,7 @@ The agent checks whether `data/dmn.sqlite` exists, runs setup if not, wanders, t
 prepare.py            — interview + importers + clustering (re-runnable)
 explore.py            — the flat wandering loop (the agent edits this)
 wander.py             — best-first tree-search wander mode
-profile.py            — export / import / merge taste profiles
+profiles.py           — export / import / merge taste profiles
 journal.py            — rebuild HTML journal / run reports
 eval.py               — rate briefs, dopamine-vs-rating report
 program.md            — agent instructions
@@ -162,10 +162,10 @@ Deep dives: [docs/tuning.md](docs/tuning.md) (dopamine constants, wander flags, 
 Your taste profile is just a SQLite + a small JSON. Export it, swap with friends, merge into a date-night shared profile:
 
 ```bash
-uv run profile.py export --out me.dmn.json
-uv run profile.py export --anonymize --out me.anon.dmn.json    # strips raw text
-uv run profile.py import friend.dmn.json --replace             # or --append
-uv run profile.py merge friend.dmn.json --blend 0.5            # see heads-up below
+uv run profiles.py export --out me.dmn.json
+uv run profiles.py export --anonymize --out me.anon.dmn.json    # strips raw text
+uv run profiles.py import friend.dmn.json --replace             # or --append
+uv run profiles.py merge friend.dmn.json --blend 0.5            # see heads-up below
 ```
 
 **Heads-up:** `merge` produces a unioned profile (concat interests + clusters), marks those clusters as incoherent, and expects you to re-cluster before real use; `--blend` is parsed but currently ignored. Exports carry a per-model embedding fingerprint so you can't accidentally import a profile built in a different embedding space — that would silently corrupt distances. Profiles built by `prepare.py` are also stamped locally with their embedding backend: if it later changes (say, sentence-transformers got pruned from the venv), explore/wander refuse to run and tell you how to fix it.

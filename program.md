@@ -124,8 +124,8 @@ description column; compose any narration yourself.
 - Modify `explore.py` — try a different mix of seed strategies, change tool selection logic, tweak the synthesis prompt. Log a one-line rationale at the top of the file as a comment every time you change it. This file is meant to be iterated.
 - Add new seed strategies to `dmn/seeds.py` if the user explicitly asks for new wandering modes.
 - Re-run `prepare.py` with `--import …` to add new sources to the taste profile.
-- Use `profile.py export` / `profile.py import` to swap profiles with friends. Note that
-  `profile.py merge` is a stub in v0.1.1 — it currently produces a union, not a real blend.
+- Use `profiles.py export` / `profiles.py import` to swap profiles with friends. Note that
+  `profiles.py merge` is a stub in v0.1.1 — it currently produces a union, not a real blend.
 
 **You CANNOT (without explicit permission):**
 
