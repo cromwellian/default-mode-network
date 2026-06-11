@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -129,8 +130,14 @@ def persist_clusters(
     cluster_themes: list[str],
     cluster_metas: list[dict],
     is_noise_flags: list[bool],
+    delete_interest_ids: Optional[list[int]] = None,
 ) -> None:
-    """Write clusters to SQLite with correct n_members and medoid ids."""
+    """Write clusters to SQLite with correct n_members and medoid ids.
+
+    `delete_interest_ids` (profile replacement) is applied in the same transaction
+    as the cluster swap, so an interrupt can't leave clusters pointing at deleted
+    interest rows.
+    """
     n = len(vectors)
     unique_labels = sorted(set(int(l) for l in result.labels))
     n_clusters = len(result.centroids)
@@ -159,6 +166,12 @@ def persist_clusters(
                 meta["silhouette"] = result.silhouette
             metas.append(meta)
 
+    if delete_interest_ids:
+        # No commit here: replace_clusters commits, closing one atomic swap.
+        conn.executemany(
+            "DELETE FROM interests WHERE id = ?",
+            [(int(i),) for i in delete_interest_ids],
+        )
     store.replace_clusters(
         conn,
         result.centroids,
@@ -241,6 +254,11 @@ def main(
         "--local-labels",
         help="Do not send sampled interest text to a remote LLM for cluster labels.",
     ),
+    replace: bool = typer.Option(
+        False,
+        "--replace",
+        help="Replace an existing profile without prompting (the journal is kept).",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Initialize data/dmn.sqlite with a taste profile (interview + importers + clustering)."""
@@ -252,6 +270,14 @@ def main(
 
     interests: list[dict] = []
     sources = [s.strip() for s in import_sources.split(",") if s.strip()]
+    known_sources = {"browser", "youtube", "gmail", "drive", "twitter", "readwise"}
+    unknown_sources = [s for s in sources if s not in known_sources]
+    if unknown_sources:
+        console.print(
+            f"[red]Unknown --import source(s): {', '.join(unknown_sources)}. "
+            f"Valid: {', '.join(sorted(known_sources))}.[/]"
+        )
+        raise typer.Exit(code=1)
 
     if dry_run and not interactive and not sources:
         console.print(
@@ -336,12 +362,33 @@ def main(
         for item in interests[:20]:
             console.print(f"  · [{item['source']}] {item['text'][:120]}")
 
+    conn = store.connect()
+    existing = store.list_interests(conn)
+    old_interest_ids: list[int] = []
+    if existing:
+        console.print(
+            f"[yellow]This replaces your existing profile ({len(existing)} interests) "
+            f"with the {len(interests)} item(s) just collected. Your journal is kept.[/]"
+        )
+        if not replace:
+            if not sys.stdin.isatty():
+                console.print(
+                    "[red]Refusing to replace an existing profile non-interactively. "
+                    "Pass --replace to rebuild.[/]"
+                )
+                conn.close()
+                raise typer.Exit(1)
+            if not typer.confirm("Replace it?", default=False):
+                console.print("Kept the existing profile — nothing was changed.")
+                conn.close()
+                raise typer.Exit(0)
+        old_interest_ids = [int(r["id"]) for r in existing]
+
     texts = [i["text"] for i in interests]
     emb.embed(texts[:1])  # first call prints any fallback notice cleanly, pre-spinner
     with console.status(f"Embedding {len(texts)} interest(s)…"):
         vectors = emb.embed(texts)
 
-    conn = store.connect()
     interest_ids: list[int] = []
     for item, v in zip(interests, vectors):
         iid = store.add_interest(
@@ -403,6 +450,7 @@ def main(
         cluster_themes,
         cluster_metas,
         is_noise_flags,
+        delete_interest_ids=old_interest_ids,
     )
     store.clear_profile_stale(conn)
 

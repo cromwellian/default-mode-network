@@ -134,10 +134,16 @@ def main(
             f"Generators: [bold]on[/] (modalities: {sorted(enabled_modalities)})"
         )
 
+    if execute and no_execute:
+        console.print("[red]--execute and --no-execute conflict — pick one.[/]")
+        raise typer.Exit(2)
     sandbox_mode = "none" if no_execute else normalize_mode(sandbox)
     if execute and sandbox_mode == "none":
-        console.print("[yellow]--execute requested but --sandbox none; ignoring --execute[/]")
-        execute = False
+        console.print(
+            "[red]--execute needs a sandbox: drop --sandbox none, or use "
+            "--sandbox subprocess / docker.[/]"
+        )
+        raise typer.Exit(2)
     code_budget = code_budget.lower().strip()
     if code_budget not in {"small", "medium", "large"}:
         console.print("[yellow]unknown --code-budget; using small[/]")
