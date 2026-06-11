@@ -261,15 +261,15 @@ def _ask_path(prompt: str, ask=_ask) -> str | None:
 
 
 def source_walk(ask=_ask, confirm=_confirm, say=None) -> list[str]:
-    """Walk taste sources one at a time (yes → details, skip → next); returns prepare args.
-
-    Everything lands in ONE prepare run because runs replace the profile (#33).
-    """
+    """Walk taste sources one at a time (yes → details, skip → next); returns prepare args."""
     say = say or console.print
     args: list[str] = []
     imports: list[str] = []
 
-    say("\nLet's gather your taste — one source at a time. Skip anything freely.")
+    say(
+        "\nLet's gather your taste — one source at a time. Skip anything freely; "
+        "you can add more later (prepare appends and re-clusters)."
+    )
 
     if confirm("1/5 Interview — 6 quick questions about what you love right now?"):
         args.append("--interactive")
@@ -332,16 +332,21 @@ def source_walk(ask=_ask, confirm=_confirm, say=None) -> list[str]:
 
 def _build_profile(demo_only: bool) -> int:
     rebuild = False
+    appending = False
     if _profile_exists():
         console.print("\nYou already have a taste profile in [bold]data/dmn.sqlite[/].")
-        if not _confirm("Rebuild it from scratch? (No keeps the existing one)", default=False):
-            return 0
-        rebuild = True
+        rebuild = _confirm(
+            "Rebuild it from scratch? (No = add new sources to it)", default=False
+        )
+        appending = not rebuild
 
     cmd = [sys.executable, "prepare.py"]
     cmd += source_walk()
     if demo_only:
         cmd.append("--dry-run")
+    if len(cmd) == 2 + (1 if demo_only else 0) and appending:
+        console.print("No sources chosen — keeping your existing profile as is.")
+        return 0
     if len(cmd) == 2:
         console.print("[yellow]No sources chosen — seeding a synthetic demo profile.[/]")
         cmd.append("--dry-run")

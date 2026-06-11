@@ -367,24 +367,76 @@ def main(
     conn = store.connect()
     existing = store.list_interests(conn)
     old_interest_ids: list[int] = []
-    if existing:
+    if existing and replace:
         console.print(
-            f"[yellow]This replaces your existing profile ({len(existing)} interests) "
-            f"with the {len(interests)} item(s) just collected. Your journal is kept.[/]"
+            f"[yellow]--replace: starting fresh — dropping your {len(existing)} existing "
+            f"interest(s) for the {len(interests)} just collected. Your journal is kept.[/]"
         )
-        if not replace:
-            if not sys.stdin.isatty():
+        old_interest_ids = [int(r["id"]) for r in existing]
+        # Old novelty memory is meaningless against a fresh profile (and may be in a
+        # different embedding space) — clear it with the interests it came from.
+        conn.execute("DELETE FROM recent_findings")
+        existing = []
+    elif existing:
+        # Appending mixes new vectors into the stored ones: refuse up front when the
+        # embedding spaces can't match (stamp mismatch, or differing dimensions on
+        # unstamped legacy profiles). The wander-side guard would only catch it after
+        # the damage is written.
+        mismatch = portability.profile_embedding_mismatch(conn)
+        if mismatch:
+            console.print(f"[red]{mismatch} Or pass --replace to rebuild fresh.[/]")
+            conn.close()
+            raise typer.Exit(1)
+        stored_vecs = [r["embedding"] for r in existing if r.get("embedding") is not None]
+        if stored_vecs is not None and len(stored_vecs):
+            probe = emb.embed(["dimension probe"])
+            if int(probe.shape[1]) != int(len(stored_vecs[0])):
                 console.print(
-                    "[red]Refusing to replace an existing profile non-interactively. "
-                    "Pass --replace to rebuild.[/]"
+                    f"[red]Your stored profile uses {len(stored_vecs[0])}-dimension "
+                    f"embeddings but the current backend produces {probe.shape[1]} — "
+                    "appending would corrupt every distance. Match DMN_EMBEDDINGS to "
+                    "how the profile was built, or pass --replace to rebuild fresh.[/]"
                 )
                 conn.close()
                 raise typer.Exit(1)
-            if not typer.confirm("Replace it?", default=False):
-                console.print("Kept the existing profile — nothing was changed.")
-                conn.close()
-                raise typer.Exit(0)
-        old_interest_ids = [int(r["id"]) for r in existing]
+        before = len(interests)
+        existing_keys = {(r.get("text") or "").strip().lower() for r in existing}
+        collided = [
+            it
+            for it in interests
+            if (it.get("text") or "").strip().lower() in existing_keys
+        ]
+        interests = [
+            it
+            for it in interests
+            if (it.get("text") or "").strip().lower() not in existing_keys
+        ]
+        if collided:
+            # Mentioning something again is a recency signal even when the text is
+            # already known — refresh last_seen so the weights notice.
+            now = time.time()
+            conn.executemany(
+                "UPDATE interests SET last_seen = ? WHERE lower(trim(text)) = ?",
+                [(now, (it.get("text") or "").strip().lower()) for it in collided],
+            )
+            conn.commit()
+        dropped = before - len(interests)
+        console.print(
+            f"Appending [bold]{len(interests)}[/] new interest(s) to your existing "
+            f"{len(existing)}"
+            + (f" ({dropped} already known — recency refreshed)" if dropped else "")
+            + " and re-clustering everything. Use --replace for a fresh start."
+        )
+        if not interests:
+            console.print(
+                "[yellow]Nothing new to add — recency refreshed, clusters unchanged.[/]"
+            )
+            conn.close()
+            raise typer.Exit(0)
+
+    if existing or old_interest_ids:
+        # If anything below crashes mid-rebuild, wander refuses until prepare succeeds.
+        store.mark_profile_stale(conn, "prepare rebuild in progress")
 
     texts = [i["text"] for i in interests]
     emb.embed(texts[:1])  # first call prints any fallback notice cleanly, pre-spinner
@@ -402,6 +454,21 @@ def main(
             last_seen=item.get("last_seen"),
         )
         interest_ids.append(iid)
+
+    if existing:
+        # Re-cluster over the union: stored embeddings + the new batch. Legacy
+        # rows without embeddings get re-embedded in memory for clustering.
+        no_vec = [r for r in existing if r.get("embedding") is None]
+        if no_vec:
+            for r, v in zip(no_vec, emb.embed([r["text"] for r in no_vec])):
+                r["embedding"] = np.asarray(v, dtype=np.float32)
+        old_vecs = np.stack(
+            [np.asarray(r["embedding"], dtype=np.float32) for r in existing]
+        )
+        vectors = np.vstack([old_vecs, vectors]) if len(interests) else old_vecs
+        interests = existing + interests
+        interest_ids = [int(r["id"]) for r in existing] + interest_ids
+        texts = [i["text"] for i in interests]
 
     with console.status(f"Clustering taste profile ({cluster_method}, recency-weighted)…"):
         result, weights, synth_labels, is_noise_flags = run_clustering_pipeline(

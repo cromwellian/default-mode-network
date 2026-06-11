@@ -53,7 +53,7 @@ Your profile, embeddings, journal, and database always stay on your machine. The
 
 ## Teaching DMN your taste
 
-The wizard offers all of these; you can re-run any of them later. Re-running `prepare.py` rebuilds your profile.
+The wizard offers all of these; you can re-run any of them later — prepare **appends** new sources to your profile and re-clusters everything (`--replace` starts fresh).
 
 ```bash
 uv run prepare.py --interactive                  # 6-question interview, ~2 minutes

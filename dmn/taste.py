@@ -228,7 +228,11 @@ def _cluster_hdbscan(
         min_samples=min(5, mcs),
         metric="euclidean",
     )
-    raw_labels = clusterer.fit_predict(normed)
+    try:
+        raw_labels = clusterer.fit_predict(normed)
+    except ValueError:
+        # Too few points for density estimation (e.g. a 1-item profile).
+        return _cluster_kmeans(embeddings, k=None, sample_weight=sample_weight)
     result = _build_from_labels(
         embeddings, raw_labels.astype(int), sample_weight, "hdbscan"
     )
