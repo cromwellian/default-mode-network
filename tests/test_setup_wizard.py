@@ -25,6 +25,13 @@ def test_small_machines_steered_to_hosted_or_demo():
     assert recommend_local_model("arm64", 4)[0] is None
 
 
+def test_unknown_ram_is_not_treated_as_tiny():
+    model, note = recommend_local_model("arm64", None)
+    assert model == "llama3.2:3b"
+    assert "detect" in note.lower()
+    assert recommend_local_model("x86_64", None)[0] is None
+
+
 def test_env_file_created_fresh(tmp_path):
     p = tmp_path / ".env"
     update_env_file({"ANTHROPIC_API_KEY": "sk-test"}, path=p)
@@ -42,3 +49,20 @@ def test_env_file_preserves_unrelated_lines_and_comments(tmp_path):
     assert "ANTHROPIC_API_KEY=old" not in text
     assert text.count("ANTHROPIC_API_KEY=") == 1
     assert "DMN_LLM_PROVIDER=ollama" in text
+
+
+def test_env_file_none_removes_stale_provider(tmp_path):
+    p = tmp_path / ".env"
+    p.write_text("DMN_LLM_PROVIDER=ollama\nDMN_LLM_MODEL=llama3.1:8b\nHF_TOKEN=x\n")
+    update_env_file({"ANTHROPIC_API_KEY": "sk-new", "DMN_LLM_PROVIDER": None, "DMN_LLM_MODEL": None}, path=p)
+    text = p.read_text()
+    assert "DMN_LLM_PROVIDER" not in text
+    assert "DMN_LLM_MODEL" not in text
+    assert "HF_TOKEN=x" in text
+    assert "ANTHROPIC_API_KEY=sk-new" in text
+
+
+def test_env_file_is_private(tmp_path):
+    p = tmp_path / ".env"
+    update_env_file({"ANTHROPIC_API_KEY": "sk-test"}, path=p)
+    assert (p.stat().st_mode & 0o777) == 0o600

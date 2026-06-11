@@ -122,7 +122,7 @@ uv run prepare.py --dry-run                      # synthetic taste profile
 uv run explore.py --dry-run --iterations 2       # wander with no API keys
 ```
 
-That should leave you with a `data/dmn.sqlite` and two markdown briefs in `journal/`. If it didn't, something's broken — open an issue.
+Either way you end up with a taste profile in `data/dmn.sqlite`; the wizard prints your first wander command, and the demo path leaves two markdown briefs in `journal/`. If not, something's broken — open an issue.
 
 For the real thing:
 

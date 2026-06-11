@@ -52,7 +52,19 @@ def _total_ram_gb() -> float | None:
 def recommend_local_model(arch: str, ram_gb: float | None) -> tuple[str | None, str]:
     """Pick a local model this machine can actually run. (None, note) = don't go local."""
     arm = arch.lower() in ("arm64", "aarch64")
-    ram = ram_gb or 0
+    if ram_gb is None:
+        if arm:
+            return (
+                "llama3.2:3b",
+                "Couldn't detect RAM — defaulting to a small 3B model. If you have "
+                "≥16 GB, pick llama3.1:8b instead.",
+            )
+        return (
+            None,
+            "Couldn't detect RAM, and CPU-only x86 is slow for local models — a hosted "
+            "key or demo mode is the safer bet.",
+        )
+    ram = ram_gb
     if not arm:
         if ram >= 16:
             return (
@@ -75,8 +87,12 @@ def recommend_local_model(arch: str, ram_gb: float | None) -> tuple[str | None, 
     )
 
 
-def update_env_file(updates: dict[str, str], path: Path = ENV_PATH) -> None:
-    """Set keys in .env in place, preserving unrelated lines and comments."""
+def update_env_file(updates: dict[str, str | None], path: Path = ENV_PATH) -> None:
+    """Set keys in .env in place, preserving unrelated lines and comments.
+
+    A value of None removes the key — used when switching providers so a stale
+    DMN_LLM_PROVIDER can't silently override the new choice on the next run.
+    """
     lines = path.read_text().splitlines() if path.exists() else []
     remaining = dict(updates)
     out: list[str] = []
@@ -86,11 +102,14 @@ def update_env_file(updates: dict[str, str], path: Path = ENV_PATH) -> None:
         if "=" in stripped and not stripped.startswith("#"):
             key = stripped.split("=", 1)[0].strip()
         if key in remaining:
-            out.append(f"{key}={remaining.pop(key)}")
+            value = remaining.pop(key)
+            if value is not None:
+                out.append(f"{key}={value}")
         else:
             out.append(line)
-    out.extend(f"{k}={v}" for k, v in remaining.items())
+    out.extend(f"{k}={v}" for k, v in remaining.items() if v is not None)
     path.write_text("\n".join(out) + "\n")
+    path.chmod(0o600)  # .env holds API keys
 
 
 def _ask(prompt: str, default: str = "") -> str:
@@ -122,7 +141,9 @@ def _setup_anthropic() -> bool:
         console.print("Checking the key with one tiny API call…")
         err = llm_mod.preflight(llm_mod.get_llm("anthropic"))
         if err is None:
-            update_env_file({"ANTHROPIC_API_KEY": key})
+            update_env_file(
+                {"ANTHROPIC_API_KEY": key, "DMN_LLM_PROVIDER": None, "DMN_LLM_MODEL": None}
+            )
             console.print("[green]Key works. Saved to .env (gitignored).[/]")
             return True
         console.print(f"[red]{err}[/]")
