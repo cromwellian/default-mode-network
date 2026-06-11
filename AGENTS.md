@@ -37,9 +37,14 @@ If anything errors, fix it for them and explain in one plain sentence what happe
 
 Ask which they prefer, with honest trade-offs:
 
-- **Claude API key** (best quality, ≈$0.25–0.85 per wander) — key from
-  https://console.anthropic.com → API Keys. **Offer both handoff routes, safer
-  one first:** (a) they add it themselves in their own terminal — give them the
+- **Claude API key** (best quality, ≈$0.25–0.85 per wander). **If they've never
+  made an API key, walk them through it click-by-click** — say up front it needs
+  a credit card ($5 of credits is plenty): console.anthropic.com → sign up or
+  log in → Settings → Billing → add payment → API Keys → Create Key (name it
+  anything) → copy it immediately (shown once). No card or no interest? Steer
+  them to the local-model or demo option below, framed as equally valid — a key
+  is not a requirement. **Offer both handoff routes, safer one first** (state
+  the absolute path of this clone's `.env` before either): (a) they add it themselves in their own terminal — give them the
   exact line (`echo 'ANTHROPIC_API_KEY=sk-ant-...' >> .env && chmod 600 .env`)
   and wait for "done"; this keeps the key out of the chat history entirely;
   (b) they paste it in chat — fine for a revocable key, but say plainly that it
