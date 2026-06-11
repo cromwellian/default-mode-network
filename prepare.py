@@ -247,7 +247,9 @@ def main(
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
-        help="No API calls; install a small synthetic profile and use the stub LLM for labels.",
+        help="No API calls; use the stub LLM for labels. Seeds a small synthetic "
+        "profile only when no interview/imports are given — combined with "
+        "--interactive or --import, your real inputs are kept.",
     ),
     local_labels: bool = typer.Option(
         False,
