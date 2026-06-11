@@ -63,6 +63,16 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["dmn"]
 
+[tool.hatch.build.targets.wheel.force-include]
+# Console scripts target these top-level modules; without force-include a wheel
+# install (uvx, pip) ships dmn/ only and every dmn-* entry point breaks.
+"prepare.py" = "prepare.py"
+"explore.py" = "explore.py"
+"wander.py" = "wander.py"
+"journal.py" = "journal.py"
+"profiles.py" = "profiles.py"
+"eval.py" = "eval.py"
+
 [tool.hatch.build.targets.sdist]
 include = [
     "dmn/",

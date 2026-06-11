@@ -208,7 +208,13 @@ def deserialize_profile(
         ]
         meta_per_cluster = [c.get("meta") for c in incoming_clusters]
         store.replace_clusters(
-            conn, centroids, labels, meta_per_cluster=meta_per_cluster
+            conn,
+            centroids,
+            labels,
+            meta_per_cluster=meta_per_cluster,
+            # Restore noise flags: without them an imported catch-all bucket
+            # becomes a normal cluster and the seed sampler stops skipping it.
+            is_noise_flags=[bool(c.get("is_noise")) for c in incoming_clusters],
         )
         n_clu = len(incoming_clusters)
     if mode == "append":
