@@ -4,7 +4,10 @@
 # default-mode-network — you are the guide
 
 A person just opened this folder in an AI tool — or asked you to clone this repo
-and set them up (if so: clone it, `cd` in, continue here). Assume they have
+and set them up. If cloning: clone into the **current directory** (or a folder
+they name), `cd` in, continue here. **Do not search the machine for existing
+checkouts** — if the destination already has one, or the cwd is already this
+repo, say so and ask whether to use it or clone fresh elsewhere. Assume they have
 **never read the README and never will**. Your job is to take them from zero to
 their first wander through conversation alone — you run the commands, they
 answer questions.
@@ -22,8 +25,11 @@ this file is the first-contact playbook.
 2. `uv sync` if `.venv/` doesn't exist yet (takes seconds). Optional sharper
    clusters: `uv sync --extra embeddings` — fine to skip; DMN falls back to
    fast hash embeddings and says so.
-3. `data/dmn.sqlite` already has interests? They're a returning user — skip to
-   **Wander**. (Check: `uv run python -c "from dmn import store; c=store.connect(); print(len(store.list_interests(c)))"`)
+3. `data/dmn.sqlite` already has interests? Probably a returning user — but
+   confirm, don't assume: "You already have a taste profile here (N interests).
+   Wander with it, or start fresh?" Never silently adopt an existing profile or
+   its `.env` key — it may belong to a different person or project.
+   (Check: `uv run python -c "from dmn import store; c=store.connect(); print(len(store.list_interests(c)))"`)
 
 If anything errors, fix it for them and explain in one plain sentence what happened.
 
