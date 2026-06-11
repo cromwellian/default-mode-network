@@ -232,7 +232,11 @@ def main(
         None, "--twitter-dir", help="Path to a Twitter/X data export directory."
     ),
     readwise_csv: Optional[Path] = typer.Option(
-        None, "--readwise-csv", help="Path to a Readwise / Pocket / GoodReads CSV."
+        None,
+        "--csv",
+        "--readwise-csv",
+        help="Any CSV with a Title/title/Highlight/text column "
+        "(Readwise, Pocket, Goodreads, Spotify-via-exportify, saved links…).",
     ),
     browsers: str = typer.Option(
         "",

@@ -34,7 +34,7 @@ uv run explore.py --minutes 5   # first wander
 
 No keys, just want to see it move? `uv run prepare.py --dry-run && uv run explore.py --dry-run --iterations 2` runs everything offline with a synthetic profile and a templated LLM.
 
-Optional sharper clusters: `uv sync --extra embeddings` (falls back to fast hash embeddings automatically if it fails on your platform).
+Optional sharper clusters: `uv sync --extra embeddings` (falls back to fast hash embeddings automatically if it fails on your platform). On an Apple-silicon Mac with an x86 (Rosetta) toolchain this fails because torch ships no Intel-mac wheels — fix with `uv python pin cpython-3.13-macos-aarch64-none && uv sync --extra embeddings`.
 
 </details>
 
@@ -60,6 +60,8 @@ uv run prepare.py --interactive                  # 6-question interview, ~2 minu
 uv run prepare.py --import browser --browsers chrome,arc
 uv run prepare.py --import youtube,gmail,drive --takeout-dir ~/Downloads/Takeout
 ```
+
+Full menu, signal-quality ranking, and quick export routes for Spotify, Goodreads, and saved-links apps: [docs/sources.md](docs/sources.md).
 
 **What's Google Takeout?** Google's export-your-data service. Go to [takeout.google.com](https://takeout.google.com), click **Deselect all**, then tick only YouTube (watch history), Mail, and/or Drive — a small export arrives in minutes, while select-all takes Google days. Export, unzip, and point `--takeout-dir` at the unzipped folder. (Your Chrome history doesn't need Takeout — `--import browser` reads it straight off your machine.)
 

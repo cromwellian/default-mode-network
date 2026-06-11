@@ -24,7 +24,9 @@ this file is the first-contact playbook.
    this is the only tool they need; after install it lands in `~/.local/bin`).
 2. `uv sync` if `.venv/` doesn't exist yet (takes seconds). Optional sharper
    clusters: `uv sync --extra embeddings` — fine to skip; DMN falls back to
-   fast hash embeddings and says so.
+   fast hash embeddings and says so. If that extra fails on an Apple-silicon
+   Mac with a Rosetta/x86 toolchain, pin a native interpreter first:
+   `uv python pin cpython-3.13-macos-aarch64-none && uv sync --extra embeddings`.
 3. `data/dmn.sqlite` already has interests? Probably a returning user — but
    confirm, don't assume: "You already have a taste profile here (N interests).
    Wander with it, or start fresh?" Never silently adopt an existing profile or
@@ -48,7 +50,8 @@ Ask which they prefer, with honest trade-offs:
   exact line (`echo 'ANTHROPIC_API_KEY=sk-ant-...' >> .env && chmod 600 .env`)
   and wait for "done"; this keeps the key out of the chat history entirely;
   (b) they paste it in chat — fine for a revocable key, but say plainly that it
-  will live in this conversation's history. Either way: write/verify `.env`
+  will live in this conversation's history. Even mid-paste-flow, accept "done"
+  or "it's in .env" — never make route (a) unreachable once (b) was chosen. Either way: write/verify `.env`
   yourself, never echo the key back or commit it, and **update the key in
   place / append: never truncate-overwrite `.env`** (it may hold other keys
   they set up earlier).
@@ -95,7 +98,8 @@ The walk:
    converted to such a CSV). Ask for the path.
 6. **Close with:** "Any other data source you wish to include in the taste
    profile?" If it exports to CSV with a title/text column, convert and use
-   step 5; otherwise note it as unsupported.
+   step 5; otherwise note it as unsupported. Full menu with signal-quality
+   ranking and per-source export routes: `docs/sources.md`.
 
 Then ask the six interview questions conversationally (they live in
 `dmn/importers/manual.py: PROMPTS`) and pipe everything into ONE command, one
@@ -154,6 +158,9 @@ If they react to a brief, record it: `uv run eval.py rate <id> <1-5>` (ids via
 ## House rules
 
 - Never send them to a doc when you can just do or explain the thing.
+- Narrate each major step in one line *before* running it, and pause at real
+  decision points (source choices, prune-or-keep, spend) — don't batch ten
+  silent minutes of work and surface one menu at the end.
 - Real costs, stated up front; never run media generation (image/music/video)
   without asking — those need extra paid keys.
 - Their data stays local (`data/`, `journal/`, gitignored). What leaves: seed
