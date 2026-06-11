@@ -76,7 +76,9 @@ Everything goes into one combined run." This matters because prepare runs
 **replace** the profile (append is on the roadmap): interview-now-import-later
 as two runs would wipe the interview. Build ONE command with everything they
 want (e.g. `--interactive --import browser,youtube --takeout-dir ~/Downloads/Takeout`).
-Browser import needs the browser closed; Takeout = takeout.google.com export.
+Browser import needs the browser closed; Takeout = takeout.google.com export
+— tell them to **Deselect all, then tick only YouTube / Mail / Drive**: a
+small export arrives in minutes, select-all takes Google days.
 
 Then ask the six interview questions yourself, conversationally (they live in
 `dmn/importers/manual.py: PROMPTS`). Then pipe the answers in, one line per
@@ -91,7 +93,8 @@ refuse to overwrite without it; their journal is always kept).
 
 Richer alternatives to offer: `--import browser` (they must close the browser
 first) or `--import youtube,gmail --takeout-dir ~/Downloads/Takeout` (Takeout =
-Google's data export, takeout.google.com).
+Google's data export, takeout.google.com — deselect all, tick only
+YouTube/Mail/Drive; small exports take minutes, select-all takes days).
 
 Afterwards, read the cluster themes back to them (prepare prints them; or
 `uv run python -c "from dmn import store; c = store.connect(); print('\n'.join(r['label'] for r in store.list_clusters(c)))"`)
