@@ -80,3 +80,32 @@ def test_interview_numbers_prompts_and_echoes_captured_pieces():
     assert "[1/6]" in joined and "[6/6]" in joined
     assert "noted: fermentation; jazz piano" in joined
     assert "too short" in joined
+
+
+def test_machine_arch_sees_through_rosetta(monkeypatch):
+    from dmn import setup_wizard as sw
+
+    monkeypatch.setattr(sw.platform, "machine", lambda: "x86_64")
+    # NB: sys is shared — _total_ram_gb() also reads sys.platform; keep this
+    # patch away from tests that call it.
+    monkeypatch.setattr(sw.sys, "platform", "darwin")
+
+    class _Out:
+        stdout = "1\nApple M2 Max\n"
+
+    monkeypatch.setattr(sw.subprocess, "run", lambda *a, **k: _Out())
+    assert sw._machine_arch() == "arm64"
+
+    class _Intel:
+        stdout = "0\nIntel(R) Core(TM) i9\n"
+
+    monkeypatch.setattr(sw.subprocess, "run", lambda *a, **k: _Intel())
+    assert sw._machine_arch() == "x86_64"
+
+
+def test_machine_arch_passthrough_off_darwin(monkeypatch):
+    from dmn import setup_wizard as sw
+
+    monkeypatch.setattr(sw.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(sw.sys, "platform", "linux")
+    assert sw._machine_arch() == "x86_64"

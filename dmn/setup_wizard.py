@@ -34,6 +34,32 @@ OLLAMA_URL = llm_mod._LOCAL_DEFAULTS["ollama"]["base_url"]
 _MODEL_SIZES_GB = {"llama3.1:8b": 4.9, "llama3.2:3b": 2.0}
 
 
+def _machine_arch() -> str:
+    """platform.machine(), corrected for Rosetta.
+
+    An x86_64 Python toolchain on Apple silicon reports x86_64 and would steer a
+    perfectly capable machine away from local models; sysctl sees through it.
+    """
+    arch = platform.machine()
+    if sys.platform == "darwin" and arch.lower() == "x86_64":
+        try:
+            probe = subprocess.run(
+                ["sysctl", "-n", "hw.optional.arm64", "machdep.cpu.brand_string"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout
+            lines = probe.splitlines()
+            # Two independent signals: the arm64 oid, or a brand line like
+            # "Apple M2 Max" (covers the oid query failing). Prefix-anchored so
+            # no Intel brand string can ever match.
+            if lines[:1] == ["1"] or any(l.startswith("Apple ") for l in lines):
+                return "arm64"
+        except Exception:
+            pass
+    return arch
+
+
 def _total_ram_gb() -> float | None:
     try:
         if sys.platform == "darwin":
@@ -274,9 +300,10 @@ def _run() -> None:
         console.print("[red]dmn-setup is interactive — run it in a terminal.[/]")
         raise SystemExit(1)
 
-    arch, ram = platform.machine(), _total_ram_gb()
+    arch, ram = _machine_arch(), _total_ram_gb()
     ram_note = f"{ram:.0f} GB RAM" if ram else "unknown RAM"
-    console.print(f"Machine: [bold]{arch}[/], {ram_note}")
+    rosetta = " (Apple silicon under a Rosetta toolchain)" if arch != platform.machine() else ""
+    console.print(f"Machine: [bold]{arch}[/]{rosetta}, {ram_note}")
     local_model, local_note = recommend_local_model(arch, ram)
 
     console.print("\nHow should DMN think?")
