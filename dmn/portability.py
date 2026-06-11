@@ -72,6 +72,22 @@ def profile_embedding_mismatch(conn: sqlite3.Connection) -> str | None:
     )
 
 
+def profile_stale_reason(conn: sqlite3.Connection) -> str | None:
+    """Reason text when a prepare rebuild was interrupted mid-flight, else None.
+
+    prepare marks the profile stale before mutating an existing one and clears the
+    mark only after clusters persist — wandering a half-rebuilt profile scores
+    against clusters that no longer match the interests.
+    """
+    meta = store.get_meta(conn, "profile_needs_recluster")
+    if isinstance(meta, dict) and meta.get("stale"):
+        return (
+            "This profile is mid-rebuild (a prepare run was interrupted: "
+            f"{meta.get('reason') or 'unknown'}). Re-run `uv run prepare.py` to finish."
+        )
+    return None
+
+
 def compute_embedding_fingerprint(model_name: str | None = None) -> str:
     """Stable per-model fingerprint used to gate import/export compatibility."""
     name = model_name or _embedding_model_name()

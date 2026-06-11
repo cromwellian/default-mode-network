@@ -164,9 +164,9 @@ def main(
             "(or `--dry-run`) first.[/]"
         )
         raise typer.Exit(1)
-    mismatch = portability.profile_embedding_mismatch(conn)
-    if mismatch:
-        console.print(f"[red]{mismatch}[/]")
+    blocker = portability.profile_embedding_mismatch(conn) or portability.profile_stale_reason(conn)
+    if blocker:
+        console.print(f"[red]{blocker}[/]")
         raise typer.Exit(1)
 
     centroids: list[np.ndarray] = [
