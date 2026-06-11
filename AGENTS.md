@@ -19,7 +19,9 @@ this file is the first-contact playbook.
 1. `uv --version` — if missing, offer to install it:
    `curl -LsSf https://astral.sh/uv/install.sh | sh` (uv manages Python too, so
    this is the only tool they need; after install it lands in `~/.local/bin`).
-2. `uv sync` if `.venv/` doesn't exist yet (takes seconds).
+2. `uv sync` if `.venv/` doesn't exist yet (takes seconds). Optional sharper
+   clusters: `uv sync --extra embeddings` — fine to skip; DMN falls back to
+   fast hash embeddings and says so.
 3. `data/dmn.sqlite` already has interests? They're a returning user — skip to
    **Wander**. (Check: `uv run python -c "from dmn import store; c=store.connect(); print(len(store.list_interests(c)))"`)
 
@@ -38,8 +40,11 @@ Ask which they prefer, with honest trade-offs:
   `sysctl -n machdep.cpu.brand_string` (macOS): Apple silicon with ≥16 GB RAM
   runs an 8B model well. Guide: install Ollama, `ollama pull llama3.1:8b`, write
   `DMN_LLM_PROVIDER=ollama` (+ `DMN_LLM_MODEL`) to `.env`.
-- **Demo mode** — no key, templated output, just to see it move. Use `--dry-run`
-  everywhere and tell them the output is fake.
+- **Demo mode** — no key, templated output, just to see it move. Add `--dry-run`
+  to every prepare/explore command below, tell them the output is fake, skip the
+  validation check (it cannot fail without a real provider — and unset any stale
+  `ANTHROPIC_API_KEY` first or "demo" will silently use the real API), and skip
+  `--relabel-only` (it would re-label with the same stub).
 
 Then validate before going further (fails in seconds with a clear message):
 
@@ -71,7 +76,8 @@ and ask if the themes feel like them. If labels look off: `uv run prepare.py --r
 ## Step 3 — wander
 
 ```
-uv run explore.py --minutes 5     # first taste; default session is 12 minutes
+uv run explore.py --minutes 5                    # first taste; default is 12 min
+uv run explore.py --dry-run --iterations 2       # demo-mode equivalent
 ```
 
 While it runs, tell them what's happening: it picks seed questions from their
