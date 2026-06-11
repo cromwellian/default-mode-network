@@ -40,8 +40,12 @@ cd "$TARGET"
 echo "Installing dependencies..."
 "$UV" sync --quiet
 
+# Under `curl | sh`, stdin is the script pipe even in a real terminal, so probe
+# /dev/tty (the controlling terminal) and hand it to the interactive wizard.
 if [ -t 0 ]; then
   exec "$UV" run dmn-setup
+elif [ -t 1 ] && [ -r /dev/tty ]; then
+  exec "$UV" run dmn-setup < /dev/tty
 fi
 echo
 echo "Done. Next steps:"

@@ -61,9 +61,9 @@ Richer alternatives to offer: `--import browser` (they must close the browser
 first) or `--import youtube,gmail --takeout-dir ~/Downloads/Takeout` (Takeout =
 Google's data export, takeout.google.com).
 
-Afterwards, read the cluster themes back to them
-(`sqlite3 data/dmn.sqlite "SELECT label FROM clusters ORDER BY id"`) and ask if
-the themes feel like them. If labels look off: `uv run prepare.py --relabel-only`.
+Afterwards, read the cluster themes back to them (prepare prints them; or
+`uv run python -c "from dmn import store; c = store.connect(); print('\n'.join(r['label'] for r in store.list_clusters(c)))"`)
+and ask if the themes feel like them. If labels look off: `uv run prepare.py --relabel-only`.
 
 ## Step 3 — wander
 
