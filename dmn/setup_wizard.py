@@ -293,6 +293,12 @@ def source_walk(ask=_ask, confirm=_confirm, say=None) -> list[str]:
         if path:
             imports.append("youtube")
             args += ["--takeout-dir", path]
+            if list(Path(path).rglob("BrowserHistory.json")):
+                if confirm(
+                    "This Takeout also has deep Chrome history (months–years vs the "
+                    "local ~90 days) — include it?"
+                ):
+                    imports.append("chrome")
             if confirm("Also import Gmail-sent and Drive titles from it? (weaker taste signal)", default=False):
                 imports += ["gmail", "drive"]
 

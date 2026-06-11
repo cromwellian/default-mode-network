@@ -107,6 +107,39 @@ _SERVICE_SEGMENT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Workspace tools: pages with real document titles that pass the noise filter but
+# encode obligations, not taste — the single biggest distortion in a knowledge
+# worker's history (issue #36: one tester's import was 40% Docs/Sheets/Calendar).
+WORKSPACE_TOOL_HOSTS: set[str] = {
+    "docs.google.com", "sheets.google.com", "slides.google.com",
+    "calendar.google.com", "drive.google.com", "meet.google.com",
+    "keep.google.com", "chat.google.com", "mail.google.com",
+    "notion.so", "www.notion.so", "linear.app", "airtable.com",
+    "asana.com", "app.asana.com", "trello.com",
+    "figma.com", "www.figma.com", "miro.com",
+    "office.com", "www.office.com", "outlook.office.com", "outlook.live.com",
+    "teams.microsoft.com", "teams.live.com",
+    "slack.com", "app.slack.com",
+    "salesforce.com", "dropbox.com", "www.dropbox.com", "paper.dropbox.com",
+}
+
+WORKSPACE_TOOL_SUFFIXES: tuple[str, ...] = (
+    ".atlassian.net", ".sharepoint.com", ".slack.com", ".zoom.us",
+    ".lightning.force.com", ".monday.com", ".airtable.com",
+)
+
+
+def is_workspace_tool(url: str) -> bool:
+    """True when the URL lives on a workspace/productivity tool (work exhaust, not taste)."""
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except Exception:
+        return False
+    if host in WORKSPACE_TOOL_HOSTS:
+        return True
+    return any(host.endswith(suf) for suf in WORKSPACE_TOOL_SUFFIXES)
+
+
 SERVICE_HOST_PREFIXES: tuple[str, ...] = (
     "login.", "signin.", "signup.", "auth.", "oauth.", "sso.", "idp.", "id.",
     "secure.", "account.", "accounts.", "my.", "myaccount.",

@@ -81,10 +81,12 @@ The walk:
    on this machine; it holds roughly the **last 90 days**; the browser must be
    closed; noise (homepages, search results, work-tool pages) should be filtered.
 3. **YouTube watch history** — the richest consumption signal. Needs a Google
-   Takeout folder (takeout.google.com → **Deselect all → tick YouTube** → minutes,
-   not days; select-all takes days). Ask for the unzipped folder's path. Offer
-   Gmail/Drive from the same folder, with the caveat that sent-mail is a weak,
-   logistics-heavy signal.
+   Takeout folder (takeout.google.com → **Deselect all → tick YouTube** (and
+   **Chrome** for deep browsing history) → minutes, not days; select-all takes
+   days). Ask for the unzipped folder's path. If it contains
+   `Chrome/BrowserHistory.json`, offer `--import chrome` too — synced history
+   reaches back months–years vs the local ~90 days. Offer Gmail/Drive from the
+   same folder, with the caveat that sent-mail is a weak, logistics-heavy signal.
 4. **Twitter/X likes** — needs an unzipped archive export; ask for the path.
 5. **Spotify / Goodreads / Readwise / saved-links apps** — any CSV with a
    Title/title/Highlight/text column imports via `--readwise-csv` (Spotify:
@@ -106,6 +108,10 @@ printf 'answer1\nanswer2\n...\n' | uv run prepare.py --interactive \
 Re-running prepare with new sources **adds** them to the existing profile and
 re-clusters everything (duplicates are skipped). Add `--replace` only when they
 want a fresh start; their journal is always kept either way.
+
+After prepare finishes, **relay its filter report and profile-quality readout**
+conversationally (what was filtered and why; source mix, dominance warnings,
+depth hints) and ask one keep-or-prune question if anything looks off.
 
 Afterwards, read the cluster themes back to them (prepare prints them; or
 `uv run python -c "from dmn import store; c = store.connect(); print('\n'.join(r['label'] for r in store.list_clusters(c)))"`)

@@ -185,6 +185,37 @@ def persist_clusters(
     portability.stamp_profile_embedding(conn)
 
 
+def profile_quality_report(interests: list[dict]) -> list[str]:
+    """Plain-language readout of profile composition: sources, dominance, depth (#27)."""
+    from collections import Counter
+
+    lines: list[str] = []
+    n = len(interests)
+    by_source: Counter = Counter()
+    for it in interests:
+        src = (it.get("source") or "?").split(":")[0]
+        by_source[src] += 1
+    breakdown = " · ".join(f"{src} {cnt}" for src, cnt in by_source.most_common())
+    lines.append(f"Profile: {n} interests ({breakdown})")
+    if n >= 20:
+        top_src, top_cnt = by_source.most_common(1)[0]
+        share = top_cnt / max(n, 1)
+        if share > 0.7:
+            lines.append(
+                f"⚠ {share:.0%} of your profile comes from one source ({top_src}). "
+                "Taste works best from a mix of what you read, watch, and listen to — "
+                "consider adding another source."
+            )
+    if n < 30:
+        lines.append(
+            f"This is a small profile ({n} items) — wanders will repeat themes quickly. "
+            "Browser history or YouTube watch history typically adds hundreds: "
+            "`uv run prepare.py --import browser` or "
+            "`--import youtube,chrome --takeout-dir ~/Downloads/Takeout`."
+        )
+    return lines
+
+
 def main(
     interactive: bool = typer.Option(
         False, "--interactive", help="Run the manual taste interview."
@@ -272,7 +303,7 @@ def main(
 
     interests: list[dict] = []
     sources = [s.strip() for s in import_sources.split(",") if s.strip()]
-    known_sources = {"browser", "youtube", "gmail", "drive", "twitter", "readwise"}
+    known_sources = {"browser", "chrome", "youtube", "gmail", "drive", "twitter", "readwise"}
     unknown_sources = [s for s in sources if s not in known_sources]
     if unknown_sources:
         console.print(
@@ -314,13 +345,32 @@ def main(
                     keep_services=keep_services,
                 )
             )
+    if "chrome" in sources:
+        if not takeout_dir:
+            console.print("[yellow]--import chrome needs --takeout-dir; skipping.[/]")
+        else:
+            console.print(
+                f"Importing Takeout Chrome history from [bold]{takeout_dir}[/] "
+                "(synced history — much deeper than the local ~90-day file)…"
+            )
+            interests.extend(
+                browser_imp.import_takeout_history(
+                    takeout_dir,
+                    limit=browser_limit,
+                    keep_noise=keep_noise,
+                    keep_services=keep_services,
+                )
+            )
     if "youtube" in sources:
         if not takeout_dir:
             console.print(
                 "[yellow]--import youtube needs --takeout-dir; skipping.[/]"
             )
         else:
-            console.print("Importing YouTube watch history…")
+            console.print(
+                f"Importing YouTube watch history from [bold]{takeout_dir}[/] "
+                "(looking for watch-history.json; processed locally)…"
+            )
             interests.extend(yt_imp.import_watch_history(takeout_dir))
     if "gmail" in sources:
         if not takeout_dir:
@@ -526,6 +576,11 @@ def main(
     _print_cluster_table(
         result, vectors, texts, synth_labels, cluster_themes, result.medoid_indices
     )
+
+    for line in profile_quality_report(interests):
+
+        console.print(line)
+
 
     console.print(
         "\n[bold green]Profile ready.[/] Next: `uv run explore.py --dry-run --iterations 2`"

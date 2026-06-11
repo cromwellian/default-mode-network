@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from dmn.importers._classify import is_allowlisted_host, is_content_url
+from dmn.importers._classify import is_allowlisted_host, is_content_url, is_workspace_tool
 
 HOME = Path.home()
 
@@ -241,6 +241,69 @@ def _normalize_row(row: dict) -> dict:
     return out
 
 
+def import_takeout_history(
+    takeout_dir,
+    limit: Optional[int] = None,
+    keep_noise: bool = False,
+    keep_services: bool = False,
+) -> list[dict]:
+    """Import Google Takeout's Chrome/BrowserHistory.json (synced history).
+
+    Much deeper than the local read: Chrome expires the on-disk database at ~90
+    days, while synced history follows the Google account's retention (typically
+    18 months or more). Rows are aggregated per URL and run through the same
+    noise pipeline as the local importer; source = browser:takeout-chrome.
+    """
+    import json as _json
+
+    base = Path(takeout_dir).expanduser()
+    candidates = sorted(base.rglob("BrowserHistory.json")) if base.exists() else []
+    if not candidates:
+        return []
+    path = candidates[0]
+    print(
+        f"[dmn] takeout-chrome: reading {path} (processed on this machine)",
+        file=sys.stderr,
+    )
+    try:
+        payload = _json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+    except Exception as e:
+        print(f"[dmn] takeout-chrome: couldn't parse {path}: {e}", file=sys.stderr)
+        return []
+    entries = payload.get("Browser History") or []
+    by_url: dict[str, dict] = {}
+    for e in entries:
+        url = e.get("url") or ""
+        if not url:
+            continue
+        usec = e.get("time_usec")
+        ts = float(usec) / 1e6 if usec else None
+        slot = by_url.setdefault(
+            url, {"title": "", "url": url, "visit_count": 0, "last_seen": 0.0}
+        )
+        slot["visit_count"] += 1
+        if e.get("title"):
+            slot["title"] = e["title"]
+        if ts and ts > slot["last_seen"]:
+            slot["last_seen"] = ts
+    rows = list(by_url.values())
+    if limit:
+        rows.sort(key=lambda r: r["visit_count"], reverse=True)
+        rows = rows[:limit]
+    normalized = []
+    for r in rows:
+        n = _normalize_row(r)
+        n["browser"] = "takeout-chrome"
+        normalized.append(n)
+    if keep_noise:
+        kept = normalized
+        stats_drops: dict = {}
+    else:
+        kept, stats_drops, _gate = _clean_with_stats(normalized, keep_services=keep_services)
+    _report_browser("takeout-chrome", len(entries), len(kept), stats_drops)
+    return _to_text_dicts(kept)
+
+
 def import_history(
     browsers: Iterable[str],
     limit: Optional[int] = None,
@@ -290,6 +353,11 @@ def import_history_with_stats(
                 "available": False,
             }
             continue
+        print(
+            f"[dmn] {b}: reading local history at {path} "
+            "(read-only copy, processed on this machine)",
+            file=sys.stderr,
+        )
         try:
             raw = _read_raw(path, b, limit)
         except Exception as e:
@@ -465,6 +533,7 @@ def _clean_with_stats(
         "generic_title": 0,
         "root_path": 0,
         "short": 0,
+        "work_tool": 0,
         "service": 0,
         "service_host_gate": 0,
         "dedup": 0,
@@ -521,6 +590,10 @@ def _clean_with_stats(
         for r, title, url, host in pre_service:
             key = host or "(unknown)"
             per_host_total[key] += 1
+            if is_workspace_tool(url):
+                drops["work_tool"] += 1
+                per_host_service[key] += 1
+                continue
             ok, _reason = is_content_url(url, title)
             if not ok:
                 drops["service"] += 1
@@ -586,19 +659,26 @@ def _split_title_url(row: dict) -> tuple[str, str]:
 
 
 def _report_browser(browser: str, raw_total: int, kept_count: int, drops: dict) -> None:
-    """Print a single per-browser summary line (raw → kept + drop categories)."""
+    """Explain the noise filtering in human terms: what was dropped, why, and the dials."""
     try:
         from rich import print as rprint  # type: ignore
 
-        rprint(
-            f"[dim]  {browser:<8} {raw_total:>6} raw \u2192 {kept_count:>6} kept "
-            f"(titleless={drops.get('titleless', 0)}, "
-            f"generic={drops.get('generic_title', 0)}, "
-            f"root={drops.get('root_path', 0)}, "
-            f"short={drops.get('short', 0)}, "
-            f"service={drops.get('service', 0)}, "
-            f"service_host_gate={drops.get('service_host_gate', 0)}, "
-            f"dedup={drops.get('dedup', 0)})[/]"
-        )
+        nav = sum(drops.get(k, 0) for k in ("titleless", "generic_title", "root_path", "short"))
+        work = drops.get("work_tool", 0)
+        service = drops.get("service", 0) + drops.get("service_host_gate", 0)
+        dedup = drops.get("dedup", 0)
+        rprint(f"  {browser}: {raw_total:,} visits \u2192 [bold]{kept_count:,}[/] kept as taste signal")
+        parts = []
+        if nav:
+            parts.append(f"{nav:,} navigation noise (homepages, search results, short titles)")
+        if work:
+            parts.append(f"{work:,} work-tool pages (Docs/Sheets/Calendar/Notion/Jira\u2026 \u2014 obligations, not taste)")
+        if service:
+            parts.append(f"{service:,} service pages (logins, dashboards, checkouts)")
+        if dedup:
+            parts.append(f"{dedup:,} duplicates")
+        if parts:
+            rprint(f"[dim]    filtered out: {'; '.join(parts)}[/]")
+            rprint("[dim]    keep more: --keep-services (work/service pages) \u00b7 --keep-noise (everything)[/]")
     except Exception:
         pass
