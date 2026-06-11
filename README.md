@@ -6,24 +6,22 @@ The idea: build a small, local taste profile of *you* (interests, recent obsessi
 
 ## Quick start
 
-Pick your door — all three end in the same place:
+In your AI tool (Claude Code, Codex, Cursor), paste:
 
-**A. You use an AI tool (easiest).** First get this folder onto your machine —
-run the door-B one-liner, or GitHub → green **Code** button → **Download ZIP** and
-unzip it. Then open the folder in Claude Code, Codex, or Cursor and say
-**"set me up"**. The agent reads `CLAUDE.md`/`AGENTS.md` and walks you through
-everything in chat — checks your tools, interviews you about your taste, runs the
-first wander, shows you the results. No docs, no flags.
+```text
+Clone https://github.com/cromwellian/default-mode-network and set me up — follow its CLAUDE.md.
+```
 
-**B. One line in a terminal.** Installs uv if needed (uv brings its own Python),
-clones, and launches the guided wizard ([read the script](scripts/install.sh) —
-it's 50 lines):
+Or in a terminal ([the script](scripts/install.sh), 50 lines):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cromwellian/default-mode-network/main/scripts/install.sh | sh
 ```
 
-**C. By hand**, if you like to see the moving parts:
+Both end at **`journal/index.html`** — your briefs, sorted by dopamine. Your data stays on your machine; no GPU needed.
+
+<details>
+<summary>Manual install · demo without keys</summary>
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh        # uv, if you don't have it
@@ -31,14 +29,14 @@ git clone https://github.com/cromwellian/default-mode-network
 cd default-mode-network
 uv sync
 uv run dmn-setup                # guided: provider, .env, taste profile
-uv run explore.py --minutes 5   # first wander (the wizard prints this too)
+uv run explore.py --minutes 5   # first wander
 ```
 
-Either way, you end with **`journal/index.html`** in a browser — your briefs, sorted by dopamine. Nothing leaves your machine until you point DMN at an LLM; no GPU needed.
+No keys, just want to see it move? `uv run prepare.py --dry-run && uv run explore.py --dry-run --iterations 2` runs everything offline with a synthetic profile and a templated LLM.
 
-No keys, no questions, just want to see it move? `uv run prepare.py --dry-run && uv run explore.py --dry-run --iterations 2` runs the whole pipeline offline with a synthetic profile and a templated LLM.
+Optional sharper clusters: `uv sync --extra embeddings` (falls back to fast hash embeddings automatically if it fails on your platform).
 
-Optional: `uv sync --extra embeddings` installs local ML embeddings for sharper taste clusters (skip if it fails on your platform — DMN falls back to fast hash embeddings automatically and tells you).
+</details>
 
 ## Choosing your brain: local vs cloud
 

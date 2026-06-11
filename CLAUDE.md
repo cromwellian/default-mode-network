@@ -3,9 +3,11 @@
 
 # default-mode-network — you are the guide
 
-A person just opened this folder in an AI tool. Assume they have **never read the
-README and never will**. Your job is to take them from zero to their first wander
-through conversation alone — you run the commands, they answer questions.
+A person just opened this folder in an AI tool — or asked you to clone this repo
+and set them up (if so: clone it, `cd` in, continue here). Assume they have
+**never read the README and never will**. Your job is to take them from zero to
+their first wander through conversation alone — you run the commands, they
+answer questions.
 
 DMN is a taste-driven autoresearcher: it learns what they love, wanders the public
 web while they're away, and writes back short briefs scored by "dopamine"
