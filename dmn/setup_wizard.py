@@ -248,10 +248,10 @@ def _profile_exists() -> bool:
         return False
 
 
-def _ask_path(prompt: str) -> str | None:
+def _ask_path(prompt: str, ask=_ask) -> str | None:
     """Ask for a path until it exists; empty answer skips."""
     while True:
-        raw = _ask(prompt + " (or Enter to skip)")
+        raw = ask(prompt + " (or Enter to skip)")
         if not raw:
             return None
         p = Path(raw).expanduser()
@@ -289,7 +289,7 @@ def source_walk(ask=_ask, confirm=_confirm, say=None) -> list[str]:
         "tick YouTube → minutes, not days). Gmail/Drive ride the same folder.[/]"
     )
     if confirm("3/5 Import YouTube history from a Takeout folder?"):
-        path = _ask_path("Path to the unzipped Takeout folder")
+        path = _ask_path("Path to the unzipped Takeout folder", ask=ask)
         if path:
             imports.append("youtube")
             args += ["--takeout-dir", path]
@@ -297,7 +297,7 @@ def source_walk(ask=_ask, confirm=_confirm, say=None) -> list[str]:
                 imports += ["gmail", "drive"]
 
     if confirm("4/5 Import Twitter/X likes from an archive export?", default=False):
-        path = _ask_path("Path to the unzipped Twitter archive folder")
+        path = _ask_path("Path to the unzipped Twitter archive folder", ask=ask)
         if path:
             imports.append("twitter")
             args += ["--twitter-dir", path]
@@ -308,7 +308,7 @@ def source_walk(ask=_ask, confirm=_confirm, say=None) -> list[str]:
         "Liked Songs to CSV in minutes.)[/]"
     )
     if confirm("5/5 Import a CSV export like that?", default=False):
-        path = _ask_path("Path to the CSV file")
+        path = _ask_path("Path to the CSV file", ask=ask)
         if path:
             imports.append("readwise")
             args += ["--readwise-csv", path]
