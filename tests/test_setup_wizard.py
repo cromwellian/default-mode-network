@@ -143,7 +143,7 @@ def test_source_walk_full_house(tmp_path, monkeypatch):
     csv = tmp_path / "liked.csv"
     csv.write_text("title\nsong\n")
     paths = iter([str(takeout), str(tw), str(csv)])
-    monkeypatch.setattr(sw, "_ask_path", lambda prompt: next(paths))
+    monkeypatch.setattr(sw, "_ask_path", lambda prompt, **kw: next(paths))
     args = sw.source_walk(
         ask=lambda *p, **k: "",
         confirm=lambda *p, **k: True,
