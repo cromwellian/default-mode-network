@@ -39,7 +39,7 @@ uv run wander.py \
 | `--children-per-expansion` | 3 | children spawned per expanded node |
 | `--beam-width` | 0 (off) | keep only the top-N open frontier leaves after each expansion |
 | `--patience` | 0 (off) | restart from a fresh root after N expansions with no improvement |
-| `--min-improvement` | 0.0 | dopamine gain below this counts as "no improvement" for patience |
+| `--min-improvement` | 0.01 | dopamine gain below this counts as "no improvement" for patience |
 | `--margin`, `--min-absolute` | 0.05 / 0.15 | pruner thresholds: children too far below the best, or simply too weak, are killed |
 | `--similarity-threshold` | 0.95 | near-duplicate children (cosine vs siblings/ancestors) are pruned |
 | `--restart-prob` | 0.08 | chance per iteration to start a fresh cluster-seeded root |
@@ -48,9 +48,19 @@ uv run wander.py \
 | `--ground/--no-ground` | on | creation activities (code/app/web sketches) first gather external references |
 | `--report/--no-report` | on | NotebookLM-style narrated run report |
 
-`--code-budget small|medium|large` bounds generated-code size and sandbox timeout;
-`--execute` opts into running sketches under `--sandbox auto|docker|subprocess|none`
-(subprocess mode strips `*_API_KEY` / `*_TOKEN` / `*_SECRET` from the child env).
+`--code-budget small|medium|large` bounds generated-code size and sandbox timeout
+(30s / 90s / 120s); `--execute` opts into running sketches under
+`--sandbox auto|docker|subprocess|none` (subprocess mode strips `*_API_KEY` /
+`*_TOKEN` / `*_SECRET` from the child env).
+
+`mutate_modality_switch` is a tree-mode mutation that keeps the parent's seed but
+switches the activity — a research brief on "RLHF preference datasets" can spawn a
+`code_sketch` child implementing a tiny preference-pair sampler. It only fires when
+`--activities` / `--activity-mix` lists more than one activity.
+
+Legacy flat-mode media generation (predates the riff activities) still works:
+`uv sync --extra generators && uv run explore.py --generate --modalities image,music`
+appends generated media to each brief.
 
 ## LLM providers
 

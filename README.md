@@ -37,12 +37,12 @@ Your profile, embeddings, journal, and database always stay on your machine. The
 
 | option | quality | speed | cost | privacy | needs |
 | ------ | ------- | ----- | ---- | ------- | ----- |
-| **Claude API key** (recommended) | best | fast | ≈$0.30–0.80 per wander | prompts go to Anthropic | key from [console.anthropic.com](https://console.anthropic.com) |
-| **OpenAI API key** | good | fast | ≈$0.10–0.40 per wander | prompts go to OpenAI | key from [platform.openai.com](https://platform.openai.com) |
+| **Claude API key** (recommended) | best | fast | ≈$0.25–0.85 per default wander | prompts go to Anthropic | key from [console.anthropic.com](https://console.anthropic.com) |
+| **OpenAI API key** | good | fast | ≈$0.25–0.85 per default wander | prompts go to OpenAI | key from [platform.openai.com](https://platform.openai.com) |
 | **Local model** (Ollama / LM Studio) | okay | depends on hardware | free | nothing leaves your machine | Apple-silicon or GPU, ≥8 GB RAM; painful on older CPU-only machines |
 | **Demo mode** (no key) | templated stubs | instant | free | fully offline | nothing |
 
-`uv run dmn-setup` walks you through whichever you pick — including installing Ollama and choosing a model your hardware can actually run. Rule of thumb: start with a hosted key for quality; switch to local when privacy matters more than polish (add `--local-labels` and local embeddings for a fully-local pipeline — see [Privacy](#privacy)). Every run starts by validating your provider with one tiny call and printing an honest cost estimate, so a bad key fails in seconds and demo mode never masquerades as research.
+`uv run dmn-setup` walks you through whichever you pick — including installing Ollama and choosing a model your hardware can actually run. Rule of thumb: start with a hosted key for quality; switch to local when privacy matters more than polish (add `--local-labels` and local embeddings for a fully-local pipeline — see [Privacy](#privacy)). Every real (non-demo) run starts by validating your provider with one tiny call and printing an honest cost estimate, so a bad key fails in seconds and demo mode never masquerades as research.
 
 ## Teaching DMN your taste
 
@@ -74,7 +74,7 @@ uv run wander.py --resume           # continue from the open frontier
 
 A first Ctrl-C finishes the current iteration and saves everything; a second forces quit. Every brief logs its dopamine breakdown in frontmatter:
 
-`total = α·alignment + β·novelty + γ·surprise + δ·fulfillment + ε·serendipity` — alignment is "stuff you'd like", novelty is "stuff you haven't seen", surprise is "new angles on things you love", fulfillment is "did the tools actually deliver", and serendipity is a small epsilon-greedy override that keeps your horizons drifting. Constants live in `dmn/taste.py`; see [docs/tuning.md](docs/tuning.md).
+`total = α·alignment + β·novelty + γ·surprise + δ·fulfillment` (+ a serendipity bonus when the epsilon-greedy roll fires) — alignment is "stuff you'd like", novelty is "stuff you haven't seen", surprise is "new angles on things you love", fulfillment is "did the tools actually deliver", and serendipity occasionally rewards a low-alignment, high-novelty find to keep your horizons drifting. Constants live in `dmn/taste.py`; see [docs/tuning.md](docs/tuning.md).
 
 ## Activities — what does the mind wander on?
 
@@ -86,9 +86,9 @@ Each iteration samples one activity from your `--activities` / `--activity-mix` 
 | `code_sketch`       | LLM writes a ≤100-line stdlib+numpy Python sketch; optionally runs it.  | (none; `--execute` for sandbox run)      |
 | `web_app_sketch`    | Self-contained interactive HTML/JS app, embedded in the brief.          | (none)                                   |
 | `app_idea`          | 1-page markdown PRD + Mermaid architecture diagram + risks.             | (none)                                   |
-| `algorithm_explore` | Picks an adjacent algorithm, writes a tiny demo + ASCII / matplotlib.   | `--extra code` (degrades to ASCII)       |
-| `ml_experiment`     | Tiny torch experiment, ≤200 lines, ≤30s on CPU, prints `METRIC: ...`.   | `--extra ml`                             |
-| `image_riff`        | LLM rewrites the seed as a visual prompt, calls an image backend.       | `GOOGLE_API_KEY` or `REPLICATE_API_TOKEN` |
+| `algorithm_explore` | Picks an adjacent algorithm, writes a tiny demo + ASCII / matplotlib.   | (none; `--extra code` for plots)          |
+| `ml_experiment`     | Tiny torch experiment, ≤200 lines, ≤30s on CPU, prints `METRIC: ...`.   | (none to draft; `--extra ml` to run it)   |
+| `image_riff`        | LLM rewrites the seed as a visual prompt, calls an image backend.       | `GOOGLE_API_KEY`, `REPLICATE_API_TOKEN`, or an HF token |
 | `music_riff`        | LLM rewrites the seed as musical direction, calls an audio backend.     | `STABILITY_API_KEY` (Stable Audio 2.0)   |
 | `video_riff`        | Same shape as image; off unless `DMN_ENABLE_VIDEO_RIFFS=1`.             | `RUN_API_KEY` or `REPLICATE_API_TOKEN`   |
 | `mood_journal`      | Reflective ~200-word journal entry over your top clusters.              | (none)                                   |
@@ -161,7 +161,7 @@ uv run profile.py import friend.dmn.json --replace             # or --append
 uv run profile.py merge friend.dmn.json --blend 0.5            # see heads-up below
 ```
 
-**Heads-up:** `merge` produces a unioned profile (concat interests + clusters), marks those clusters as incoherent, and expects you to re-cluster before real use; `--blend` is parsed but currently ignored. Exports carry a per-model embedding fingerprint so you can't accidentally import a profile built in a different embedding space — that would silently corrupt distances. Profiles are also stamped locally: if your embedding backend changes (say, sentence-transformers got pruned from the venv), explore/wander refuse to run and tell you how to fix it.
+**Heads-up:** `merge` produces a unioned profile (concat interests + clusters), marks those clusters as incoherent, and expects you to re-cluster before real use; `--blend` is parsed but currently ignored. Exports carry a per-model embedding fingerprint so you can't accidentally import a profile built in a different embedding space — that would silently corrupt distances. Profiles built by `prepare.py` are also stamped locally with their embedding backend: if it later changes (say, sentence-transformers got pruned from the venv), explore/wander refuse to run and tell you how to fix it.
 
 ## Privacy
 

@@ -75,9 +75,9 @@ link to the app and embed it in a sandboxed iframe.
 Migrations live in `scripts/` and are idempotent — run in order if you're jumping
 multiple versions:
 
-| you ran      | run                                  | what it does                                                         |
-| ------------ | ------------------------------------ | -------------------------------------------------------------------- |
-| v0.1.0/0.1.1 | `uv run scripts/migrate_v0_1_2.py`   | re-filters noisy `browser:*` interests, re-clusters, re-labels       |
-| v0.1.2       | `uv run scripts/migrate_v0_1_3.py`   | schema bump (journal activity/artifact columns)                      |
-| v0.1.3       | `uv run scripts/migrate_v0_1_4.py`   | schema bump (run/session bookkeeping)                                |
-| ≤ v0.3       | `uv run scripts/migrate_v0_4.py`     | HDBSCAN/medoid upgrade for existing profiles                         |
+| you ran      | run                                  | what it does                                                              |
+| ------------ | ------------------------------------ | -------------------------------------------------------------------------- |
+| v0.1.0/0.1.1 | `uv run scripts/migrate_v0_1_2.py`   | re-filters noisy `browser:*` interests, re-clusters, re-labels             |
+| v0.1.2       | `uv run scripts/migrate_v0_1_3.py`   | drops/reimports browser rows, re-clusters (weighted KMeans), re-labels     |
+| v0.1.3       | `uv run scripts/migrate_v0_1_4.py`   | same, with the service classifier applied to browser rows                  |
+| ≤ v0.3       | `uv run scripts/migrate_v0_4.py`     | HDBSCAN/medoid upgrade for existing profiles                               |

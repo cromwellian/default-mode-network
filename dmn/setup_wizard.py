@@ -246,6 +246,12 @@ def _build_profile(demo_only: bool) -> int:
 def run() -> None:
     """Entry point for the `dmn-setup` console script."""
     try:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+    except Exception:
+        pass
+    try:
         _run()
     except KeyboardInterrupt:
         console.print("\n[yellow]Setup aborted — re-run `uv run dmn-setup` any time.[/]")
