@@ -121,7 +121,10 @@ class OpenAILLM:
             from openai import OpenAI  # type: ignore
         except ImportError as e:  # pragma: no cover
             raise RuntimeError("openai not installed; `uv add openai`") from e
-        self.client = OpenAI()
+        # DMN_LLM_BASE_URL points this provider at any OpenAI-compatible gateway
+        # (Vercel AI Gateway, OpenRouter, ...) — same knob the local providers use.
+        base_url = os.environ.get("DMN_LLM_BASE_URL")
+        self.client = OpenAI(base_url=base_url) if base_url else OpenAI()
         self.model = model or os.environ.get("DMN_LLM_MODEL") or "gpt-4o-mini"
 
     def complete(self, system: str, user: str, max_tokens: int = 1024) -> LLMResponse:
