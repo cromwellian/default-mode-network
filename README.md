@@ -113,14 +113,16 @@ uv sync
 # on your platform; DMN falls back to fast hash embeddings automatically
 uv sync --extra embeddings
 
-# 3. Bootstrap a taste profile (with a synthetic seed, no input needed)
-uv run prepare.py --dry-run
+# 3. Guided setup (recommended): picks an LLM (Claude key / local Ollama / demo),
+#    validates it, writes .env, and builds your taste profile
+uv run dmn-setup
 
-# 4. Take a wander (no API keys; uses Wikipedia, DuckDuckGo, HN)
-uv run explore.py --dry-run --iterations 2
+# …or skip the wizard for a zero-input demo:
+uv run prepare.py --dry-run                      # synthetic taste profile
+uv run explore.py --dry-run --iterations 2       # wander with no API keys
 ```
 
-That should leave you with a `data/dmn.sqlite` and two markdown briefs in `journal/`. If it didn't, something's broken — open an issue.
+Either way you end up with a taste profile in `data/dmn.sqlite`; the wizard prints your first wander command, and the demo path leaves two markdown briefs in `journal/`. If not, something's broken — open an issue.
 
 For the real thing:
 
