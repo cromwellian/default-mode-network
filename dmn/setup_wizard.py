@@ -248,6 +248,88 @@ def _profile_exists() -> bool:
         return False
 
 
+def _ask_path(prompt: str) -> str | None:
+    """Ask for a path until it exists; empty answer skips."""
+    while True:
+        raw = _ask(prompt + " (or Enter to skip)")
+        if not raw:
+            return None
+        p = Path(raw).expanduser()
+        if p.exists():
+            return str(p)
+        console.print(f"[yellow]Can't find {p} — check the path.[/]")
+
+
+def source_walk(ask=_ask, confirm=_confirm, say=None) -> list[str]:
+    """Walk taste sources one at a time (yes → details, skip → next); returns prepare args.
+
+    Everything lands in ONE prepare run because runs replace the profile (#33).
+    """
+    say = say or console.print
+    args: list[str] = []
+    imports: list[str] = []
+
+    say("\nLet's gather your taste — one source at a time. Skip anything freely.")
+
+    if confirm("1/5 Interview — 6 quick questions about what you love right now?"):
+        args.append("--interactive")
+
+    say(
+        "[dim]Browser history: DMN reads your browser's local database (Chrome/Arc/"
+        "Brave/Edge/Firefox/Safari) — a read-only copy, processed on this machine. "
+        "Holds roughly the last 90 days. Close the browser first. Noise (homepages, "
+        "search results, per-site floods) is filtered out.[/]"
+    )
+    if confirm("2/5 Import browser history?"):
+        imports.append("browser")
+
+    say(
+        "[dim]YouTube watch history: the single richest 'what I consume' signal. "
+        "Comes from a Google Takeout export (takeout.google.com → Deselect all → "
+        "tick YouTube → minutes, not days). Gmail/Drive ride the same folder.[/]"
+    )
+    if confirm("3/5 Import YouTube history from a Takeout folder?"):
+        path = _ask_path("Path to the unzipped Takeout folder")
+        if path:
+            imports.append("youtube")
+            args += ["--takeout-dir", path]
+            if confirm("Also import Gmail-sent and Drive titles from it? (weaker taste signal)", default=False):
+                imports += ["gmail", "drive"]
+
+    if confirm("4/5 Import Twitter/X likes from an archive export?", default=False):
+        path = _ask_path("Path to the unzipped Twitter archive folder")
+        if path:
+            imports.append("twitter")
+            args += ["--twitter-dir", path]
+
+    say(
+        "[dim]Spotify, Goodreads, Readwise, saved-links apps — any CSV with a "
+        "Title/title/Highlight/text column works. (Spotify: exportify.net exports "
+        "Liked Songs to CSV in minutes.)[/]"
+    )
+    if confirm("5/5 Import a CSV export like that?", default=False):
+        path = _ask_path("Path to the CSV file")
+        if path:
+            imports.append("readwise")
+            args += ["--readwise-csv", path]
+
+    extra = ask(
+        "Any other data source you wish to include? Supported today: the ones above; "
+        "anything else exports to CSV (title/text column) and comes in via 5. "
+        "Name it and I'll note it, or Enter to finish:"
+    )
+    if extra:
+        say(
+            f"[yellow]Noted: '{extra}' isn't natively supported yet — if it exports "
+            "to CSV, re-run dmn-setup and feed it via the CSV step. Consider filing "
+            "an importer request on GitHub.[/]"
+        )
+
+    if imports:
+        args += ["--import", ",".join(imports)]
+    return args
+
+
 def _build_profile(demo_only: bool) -> int:
     rebuild = False
     if _profile_exists():
@@ -255,18 +337,14 @@ def _build_profile(demo_only: bool) -> int:
         if not _confirm("Rebuild it from scratch? (No keeps the existing one)", default=False):
             return 0
         rebuild = True
-    console.print("\nHow should DMN learn your taste?")
-    console.print("  1) Quick interview — 6 questions, ~2 minutes")
-    console.print("  2) Interview + import your browser history (close your browser first)")
-    console.print("  3) Synthetic demo profile — no input, just to see it run")
-    choice = _ask("Choose 1, 2 or 3:", default="3" if demo_only else "1")
+
     cmd = [sys.executable, "prepare.py"]
-    if choice == "2":
-        cmd += ["--interactive", "--import", "browser"]
-    elif choice == "3":
-        cmd += ["--dry-run"]
-    else:
-        cmd += ["--interactive"]
+    cmd += source_walk()
+    if demo_only:
+        cmd.append("--dry-run")
+    if len(cmd) == 2:
+        console.print("[yellow]No sources chosen — seeding a synthetic demo profile.[/]")
+        cmd.append("--dry-run")
     if rebuild:
         cmd.append("--replace")  # already confirmed above; avoid a double prompt
     console.print(f"[dim]Running: {' '.join(cmd[1:])}[/]\n")
