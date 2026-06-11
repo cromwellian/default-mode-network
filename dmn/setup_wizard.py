@@ -224,6 +224,17 @@ def _build_profile(demo_only: bool) -> int:
 
 def run() -> None:
     """Entry point for the `dmn-setup` console script."""
+    try:
+        _run()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Setup aborted — re-run `uv run dmn-setup` any time.[/]")
+        raise SystemExit(130)
+    except EOFError:
+        console.print("\n[red]Input ended — run dmn-setup in an interactive terminal.[/]")
+        raise SystemExit(1)
+
+
+def _run() -> None:
     console.print("[bold magenta]DMN setup[/] — let's get you wandering.\n")
     if not Path("prepare.py").exists():
         console.print("[red]Run this from the default-mode-network repo root.[/]")
