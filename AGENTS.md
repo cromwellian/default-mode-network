@@ -38,10 +38,15 @@ If anything errors, fix it for them and explain in one plain sentence what happe
 Ask which they prefer, with honest trade-offs:
 
 - **Claude API key** (best quality, ≈$0.25–0.85 per wander) — key from
-  https://console.anthropic.com → API Keys. If they paste a key, write it to
-  `.env` yourself (`ANTHROPIC_API_KEY=...`, then `chmod 600 .env`) — never echo
-  the key back or commit it, and **update the key in place / append: never
-  truncate-overwrite `.env`** (it may hold other keys they set up earlier).
+  https://console.anthropic.com → API Keys. **Offer both handoff routes, safer
+  one first:** (a) they add it themselves in their own terminal — give them the
+  exact line (`echo 'ANTHROPIC_API_KEY=sk-ant-...' >> .env && chmod 600 .env`)
+  and wait for "done"; this keeps the key out of the chat history entirely;
+  (b) they paste it in chat — fine for a revocable key, but say plainly that it
+  will live in this conversation's history. Either way: write/verify `.env`
+  yourself, never echo the key back or commit it, and **update the key in
+  place / append: never truncate-overwrite `.env`** (it may hold other keys
+  they set up earlier).
 - **Local model, free + private** — needs Ollama and decent hardware. Check
   `sysctl -n machdep.cpu.brand_string` (macOS): Apple silicon with ≥16 GB RAM
   runs an 8B model well. Guide: install Ollama, `ollama pull llama3.1:8b`, write
