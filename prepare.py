@@ -20,7 +20,7 @@ except Exception:
 
 from dmn import __version__
 from dmn import embeddings as emb
-from dmn import labeling, store, taste
+from dmn import labeling, portability, store, taste
 from dmn.importers import browser as browser_imp
 from dmn.importers import drive as drive_imp
 from dmn.importers import gmail as gmail_imp
@@ -158,6 +158,7 @@ def persist_clusters(
         cluster_method=result.method,
         is_noise_flags=is_noise_flags,
     )
+    portability.stamp_profile_embedding(conn)
 
 
 def main(

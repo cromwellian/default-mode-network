@@ -14,21 +14,20 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
-import os
 import sqlite3
 from typing import Any
 
 import numpy as np
 
-from dmn import __version__, store
+from dmn import __version__, embeddings, store
 
 SCHEMA_VERSION = 6
 _SUPPORTED_SCHEMAS = {1, 2, 3, 4, 5, 6}
 
 
 def _embedding_model_name() -> str:
-    """Return the canonical name of the embedding model currently configured."""
-    backend = os.environ.get("DMN_EMBEDDINGS", "st").lower()
+    """Return the canonical name of the embedding model actually in use."""
+    backend = embeddings.effective_backend()
     if backend == "openai":
         return "openai/text-embedding-3-small"
     if backend == "hash":
@@ -42,6 +41,35 @@ def _embedding_dim() -> int:
     if "text-embedding-3-small" in name:
         return 1536
     return 384
+
+
+EMBEDDING_MODEL_META_KEY = "embedding_model"
+
+
+def stamp_profile_embedding(conn: sqlite3.Connection) -> None:
+    """Record in the profile DB which embedding model produced its vectors."""
+    store.set_meta(conn, EMBEDDING_MODEL_META_KEY, _embedding_model_name())
+
+
+def profile_embedding_mismatch(conn: sqlite3.Connection) -> str | None:
+    """Error text if the profile's vectors came from a different embedding backend.
+
+    Returns None when the backends match or the profile predates stamping.
+    Mixing backends silently corrupts every distance the dopamine score relies on,
+    so callers should refuse to wander on a mismatch.
+    """
+    stored = store.get_meta(conn, EMBEDDING_MODEL_META_KEY)
+    current = _embedding_model_name()
+    if not stored or stored == current:
+        return None
+    if current == "dmn/hash-fallback" and "sentence-transformers" in stored:
+        hint = "Run `uv sync --extra embeddings` to restore it, or rebuild with `uv run prepare.py`."
+    else:
+        hint = "Rebuild the profile with `uv run prepare.py`, or switch DMN_EMBEDDINGS back."
+    return (
+        f"This profile was embedded with {stored}, but the current backend is {current}. "
+        f"Taste scores would be meaningless. {hint}"
+    )
 
 
 def compute_embedding_fingerprint(model_name: str | None = None) -> str:
@@ -119,7 +147,11 @@ def deserialize_profile(
     local_fp = compute_embedding_fingerprint()
     if payload_fp != local_fp:
         raise ValueError(
-            f"embedding fingerprint mismatch: payload={payload_fp} local={local_fp}. "
+            f"embedding fingerprint mismatch: payload={payload_fp} local={local_fp} "
+            f"({_embedding_model_name()}). Re-export the profile from the source install, "
+            "or match its embedding backend here first. Note: exports made before v0.5.1 "
+            "from installs without sentence-transformers were mislabeled as all-MiniLM-L6-v2 "
+            "even though their vectors were hash-derived. "
             "Re-embedding-on-import lands in v0.2."
         )
     if mode not in ("replace", "append"):

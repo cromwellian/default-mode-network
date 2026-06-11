@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 from typing import Sequence
 
 import numpy as np
@@ -10,16 +11,26 @@ import numpy as np
 DEFAULT_DIM = 384  # all-MiniLM-L6-v2
 
 _MODEL_CACHE: dict = {}
+_warned_fallback = False
+
+
+def effective_backend() -> str:
+    """The backend embed() will actually use: "st", "openai", or "hash"."""
+    backend = os.environ.get("DMN_EMBEDDINGS", "st").lower()
+    if backend in ("openai", "hash"):
+        return backend
+    return "st" if _get_st_model() is not None else "hash"
 
 
 def _get_st_model():
-    """Return a cached sentence-transformers model, or None if package missing."""
-    try:
-        from sentence_transformers import SentenceTransformer  # type: ignore
-    except Exception:
-        return None
+    """Return a cached sentence-transformers model, or None if it can't be loaded."""
     if "st" not in _MODEL_CACHE:
-        _MODEL_CACHE["st"] = SentenceTransformer("all-MiniLM-L6-v2")
+        try:
+            from sentence_transformers import SentenceTransformer  # type: ignore
+
+            _MODEL_CACHE["st"] = SentenceTransformer("all-MiniLM-L6-v2")
+        except Exception:
+            _MODEL_CACHE["st"] = None
     return _MODEL_CACHE["st"]
 
 
@@ -42,6 +53,14 @@ def embed(texts: Sequence[str]) -> np.ndarray:
         return np.stack([_hash_embed(t) for t in texts])
     model = _get_st_model()
     if model is None:
+        global _warned_fallback
+        if not _warned_fallback:
+            _warned_fallback = True
+            print(
+                "embeddings: sentence-transformers not installed — using fast hash fallback "
+                "(fine for a test drive; `uv sync --extra embeddings` gives better clusters)",
+                file=sys.stderr,
+            )
         return np.stack([_hash_embed(t) for t in texts])
     arr = np.asarray(
         model.encode(texts, normalize_embeddings=True, show_progress_bar=False),
